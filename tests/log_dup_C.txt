@@ -27,3 +27,5 @@ Comandos:
   controladora: False  com_token: False  aguardando_retorno: False
   anel: ['A', 'B', 'C']
   sucessor: A  fila: 0  primeiro_token_gerado: False
+  tokens_perdidos: 0  tokens_duplicados: 0
+[C] enviando LEAVE (saida da rede)

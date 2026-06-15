@@ -1,6 +1,6 @@
 === Anel de Tokens (UDP) ===
 apelido: C | modo: local | endereco anunciado: 127.0.0.1:6003
-Config: apelido=C | token_time=1.0s | error_prob=0.0% | token_timeout=10.0s | min_token_interval=0.5s
+Config: apelido=C | token_time=1.0s | error_prob=0.0% | token_timeout=8.0s | min_token_interval=2.0s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
 [C] HELLO de A (entrou no anel)
 [C] HELLO de B (entrou no anel)
@@ -18,38 +18,23 @@ Comandos:
 [C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
-[C] repassando DADOS de B para A
-[C] recebeu o token
-[C] enviando token para A
-[C] recebeu o token
-[C] enviando token para A
-[C] CRC NAO confere de A (recebido=2097710523 calculado=2382087424) -> NAK
-[C] DADOS de A: "Testeuerro" -> NAK
-[C] recebeu o token
-[C] enviando token para A
-[C] DADOS de A: "Teste erro" -> ACK
+[C] B saiu da rede -> recalculando anel
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
-[C] msg para BROADCAST enfileirada (1/10)
-[C] recebeu o token
-[C] enviando DADOS para BROADCAST (corrompido=False): "Ola galera"
-[C] BROADCAST concluido (deu a volta no anel)
-[C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
-[C] nao estou com o token no momento (nada a retirar)
 [C] recebeu o token
 [C] enviando token para A
 [C] STATUS
   endereco: 127.0.0.1:6003  modo: local
   controladora: False  com_token: False  aguardando_retorno: False
-  anel: ['A', 'B', 'C']
+  anel: ['A', 'C']
   sucessor: A  fila: 0  primeiro_token_gerado: False
   tokens_perdidos: 0  tokens_duplicados: 0
 [C] recebeu o token

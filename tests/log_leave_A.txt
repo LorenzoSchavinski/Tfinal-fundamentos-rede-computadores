@@ -1,6 +1,6 @@
 === Anel de Tokens (UDP) ===
 apelido: A | modo: local | endereco anunciado: 127.0.0.1:6001
-Config: apelido=A | token_time=1.0s | error_prob=100.0% | token_timeout=10.0s | min_token_interval=2.0s
+Config: apelido=A | token_time=1.0s | error_prob=0.0% | token_timeout=8.0s | min_token_interval=2.0s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
 No 'A' pronto. Digite 'help' para os comandos.
 Comandos:
@@ -19,13 +19,25 @@ Comandos:
 [A] recebeu o token
 [A] enviando token para B
 [A] recebeu o token
-[A] enviando token para B
-[A] TOKEN DUPLICADO detectado (intervalo < minimo) -> removido da rede
-[A] TOKEN DUPLICADO detectado (intervalo < minimo) -> removido da rede
+[A] B saiu da rede -> recalculando anel
+[A] enviando token para C
+[A] recebeu o token
+[A] enviando token para C
+[A] recebeu o token
+[A] enviando token para C
+[A] recebeu o token
+[A] enviando token para C
+[A] recebeu o token
+[A] enviando token para C
+[A] recebeu o token
+[A] enviando token para C
+[A] recebeu o token
 [A] STATUS
   endereco: 127.0.0.1:6001  modo: local
-  controladora: True  com_token: False  aguardando_retorno: False
-  anel: ['A', 'B', 'C']
-  sucessor: B  fila: 0  primeiro_token_gerado: True
-  tokens_perdidos: 0  tokens_duplicados: 2
+  controladora: True  com_token: True  aguardando_retorno: False
+  anel: ['A', 'C']
+  sucessor: C  fila: 0  primeiro_token_gerado: True
+  tokens_perdidos: 0  tokens_duplicados: 0
+[A] enviando token para C
+[A] recebeu o token
 [A] enviando LEAVE (saida da rede)

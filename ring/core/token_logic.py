@@ -38,6 +38,7 @@ class TokenLogicMixin:
                 # TIMER_FORWARD_TOKEN pendente com a epoca atual; bumpar epoch cancelaria
                 # esse timer e mataria o anel. Consumir silenciosamente o token excedente
                 # (retornar sem encaminhar) eh suficiente.
+                self.tokens_duplicados += 1
                 log("[{}] TOKEN DUPLICADO detectado (intervalo < minimo) -> removido da rede".format(self.apelido))
                 self.last_token_rx = now  # atualiza janela para o proximo token genuino
                 return
@@ -47,6 +48,14 @@ class TokenLogicMixin:
         self.has_token = True
         self._refresh_monitor_pause()  # token esta aqui: pausa o monitor enquanto o seguramos
         log("[{}] recebeu o token".format(self.apelido))
+
+        if self._is_alone():
+            # Caso degenerado: somos a unica maquina no anel. Nao enviamos o token a nos
+            # mesmos; seguramos quieto ate outra maquina entrar (DISCOVER/HELLO o retoma).
+            if not self._segurando_sozinho:
+                log("[{}] sou a unica maquina no anel; segurando o token ate outra entrar".format(self.apelido))
+                self._segurando_sozinho = True
+            return
 
         if not self.queue.is_empty():
             # Segura o token e transmite; nao encaminha agora.
@@ -60,9 +69,13 @@ class TokenLogicMixin:
             ).start()
 
     def _on_timer_forward_token(self, ep) -> None:
-        # So encaminha se o timer ainda eh valido e nada mudou (sem dados pendentes).
-        if ep == self.epoch and self.has_token and self.queue.is_empty():
-            self._forward_token()
+        # Corrige a corrida: se uma mensagem foi enfileirada durante a janela
+        # de espera do token, envia os dados; senao, repassa o token.
+        if ep == self.epoch and self.has_token and not self.waiting_for_data_return and not self._is_alone():
+            if self.queue.is_empty():
+                self._forward_token()
+            else:
+                self._send_data_packet(self.queue.peek())
 
     def _send_data_packet(self, item) -> None:
         crc = crc_mod.crc_field(item.message_bytes)
@@ -73,7 +86,6 @@ class TokenLogicMixin:
             msg, self.config.error_prob, skip=(item.no_error or is_bcast)
         )
         data = build_data(self.apelido, item.destino, CTRL_NONE, crc, msg_out)
-        self.inflight = item
         self.waiting_for_data_return = True
         self._refresh_monitor_pause()  # aguardando retorno dos dados: pausa monitor
         log("[{}] enviando DADOS para {} (corrompido={}): \"{}\"".format(
@@ -82,6 +94,9 @@ class TokenLogicMixin:
         self.monitor.note_activity()
 
     def _forward_token(self) -> None:
+        if self._is_alone():
+            # Defensivo: nunca enviar o token a nos mesmos; mantem has_token inalterado.
+            return
         self.has_token = False
         self._refresh_monitor_pause()  # token saiu daqui: retoma vigilancia
         ap, _ = self._successor()
@@ -93,6 +108,9 @@ class TokenLogicMixin:
         self.epoch += 1
         if self.is_controller:
             self.expect_token_return = True
+        # Baseline fresco para o detector de duplicata: evita que um timestamp
+        # antigo julgue mal a chegada do proximo token apos a (re)geracao.
+        self.last_token_rx = time.monotonic()
         self.first_token_generated = True
         self.monitor.set_enabled(self.is_controller)
         self.has_token = False
@@ -106,6 +124,7 @@ class TokenLogicMixin:
         # Token perdido (timeout na controladora): so regenera se ha mais de um
         # membro e nao estamos no meio de uma transmissao de dados.
         if len(self.ring.members()) > 1 and not self.waiting_for_data_return:
+            self.tokens_perdidos += 1
             log("[{}] TOKEN PERDIDO detectado (timeout) -> gerando novo token".format(self.apelido))
             self._generate_token()
 

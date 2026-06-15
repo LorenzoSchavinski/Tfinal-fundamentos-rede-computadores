@@ -14,6 +14,7 @@ Regras gerais do formato:
 Tipos de pacote (prefixo numerico antes do primeiro ':'):
   10   -> DISCOVER  (anuncio de entrada na rede)
   20   -> HELLO     (resposta de presenca)
+  30   -> LEAVE     (anuncio de saida educada da rede)
   1000 -> TOKEN     (o bastao que circula no anel; nao tem ':')
   2000 -> DATA      (mensagem de dados com origem, destino, controle e CRC)
 """
@@ -22,6 +23,7 @@ from __future__ import annotations
 # --- Prefixos de tipo (string, pois vao em ASCII no fio) ---------------------
 P_DISCOVER = "10"
 P_HELLO = "20"
+P_LEAVE = "30"
 P_TOKEN = "1000"
 P_DATA = "2000"
 
@@ -50,6 +52,11 @@ def build_discover(apelido: str, ip: str) -> bytes:
 def build_hello(apelido: str, ip: str) -> bytes:
     """Monta ``b"20:<apelido>:<ip>"``."""
     return P_HELLO.encode("ascii") + _SEP + apelido.encode("ascii") + _SEP + ip.encode("ascii")
+
+
+def build_leave(apelido: str, ip: str) -> bytes:
+    """Monta ``b"30:<apelido>:<ip>"`` (anuncio de saida educada)."""
+    return P_LEAVE.encode("ascii") + _SEP + apelido.encode("ascii") + _SEP + ip.encode("ascii")
 
 
 def build_token() -> bytes:
@@ -124,12 +131,17 @@ def parse(datagram: bytes) -> dict:
         return {"type": "UNKNOWN", "raw": datagram}
     prefixo = prefixo.decode("ascii", errors="replace")
 
-    if prefixo == P_DISCOVER or prefixo == P_HELLO:
-        # "10:<apelido>:<ip>" -> 3 partes.
+    if prefixo == P_DISCOVER or prefixo == P_HELLO or prefixo == P_LEAVE:
+        # "10:<apelido>:<ip>" -> 3 partes (mesmo formato para DISCOVER/HELLO/LEAVE).
         partes = datagram.split(_SEP, 2)
         if len(partes) < 3:
             return {"type": "UNKNOWN", "raw": datagram}
-        tipo = "DISCOVER" if prefixo == P_DISCOVER else "HELLO"
+        if prefixo == P_DISCOVER:
+            tipo = "DISCOVER"
+        elif prefixo == P_HELLO:
+            tipo = "HELLO"
+        else:
+            tipo = "LEAVE"
         return {
             "type": tipo,
             "apelido": partes[1].decode("ascii", errors="replace"),
@@ -184,5 +196,11 @@ if __name__ == "__main__":
     assert pd["type"] == "DISCOVER"
     assert pd["apelido"] == "A"
     assert pd["ip"] == "1.2.3.4"
+
+    # LEAVE: mesmo formato de DISCOVER/HELLO.
+    pl = parse(build_leave("B", "5.6.7.8"))
+    assert pl["type"] == "LEAVE"
+    assert pl["apelido"] == "B"
+    assert pl["ip"] == "5.6.7.8"
 
     print("packets.py: auto-teste OK")

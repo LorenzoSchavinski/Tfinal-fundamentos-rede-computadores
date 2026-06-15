@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import traceback
 
 from ring.protocol import crc as crc_mod
 from ring.protocol.packets import (
@@ -22,6 +23,7 @@ from ring.protocol.packets import (
     CTRL_NONE,
     build_discover,
     build_hello,
+    build_leave,
     parse,
     set_controle,
 )
@@ -73,7 +75,9 @@ class Node(TokenLogicMixin, CommandsMixin):
         self.epoch = 0
         self.last_token_rx = None      # monotonic do ultimo token aceito (controladora)
         self.expect_token_return = False
-        self.inflight = None           # QueueItem circulando no momento
+        self.tokens_perdidos = 0       # contador de tokens perdidos detectados (PDF)
+        self.tokens_duplicados = 0     # contador de tokens duplicados detectados (PDF)
+        self._segurando_sozinho = False  # latch: True enquanto seguramos o token por estar sozinho (loga so uma vez)
 
         self._engine = None
 
@@ -110,6 +114,12 @@ class Node(TokenLogicMixin, CommandsMixin):
                 self.post("RX_DISCOVER", apelido=ap, ip=end[0], port=end[1])
             else:
                 self.post("RX_HELLO", apelido=ap, ip=end[0], port=end[1])
+        elif tipo == "LEAVE":
+            ap = p["apelido"]
+            # Supressao de eco proprio: ignora o nosso anuncio que volta no broadcast.
+            if ap == self.apelido:
+                return
+            self.post("RX_LEAVE", apelido=ap, ip=p["ip"])
         elif tipo == "TOKEN":
             # Reseta o relogio de atividade do monitor imediatamente (thread receptora),
             # antes mesmo de o motor processar o evento. Garante que token circulando
@@ -146,16 +156,26 @@ class Node(TokenLogicMixin, CommandsMixin):
                 break
             handler = self._handlers.get(etype)
             if handler is not None:
-                handler(self, **kw)
+                try:
+                    handler(self, **kw)
+                except Exception:
+                    log("[{}] ERRO inesperado no handler {}: {}".format(self.apelido, etype, traceback.format_exc()))
         self._shutdown()
 
     def _shutdown(self) -> None:
         self.monitor.stop()
+        # Saida educada: avisa os pares para nos removerem e refazerem o anel.
+        # Enviado com o socket ainda aberto, antes de transport.close().
+        leave_pkt = build_leave(self.apelido, self.advertise_ip)
+        log("[{}] enviando LEAVE (saida da rede)".format(self.apelido))
+        self.transport.broadcast(leave_pkt)
         self.transport.close()
 
     def close(self) -> None:
-        """Solicita encerramento do motor a partir de outra thread."""
+        """Solicita encerramento do motor e aguarda o termino (inclusive _shutdown/LEAVE)."""
         self.post("CMD_QUIT")
+        if self._engine is not None and self._engine.is_alive():
+            self._engine.join(timeout=5)
 
     # --------------------------------------------------------------- helpers
     def _recompute_role(self) -> None:
@@ -165,10 +185,15 @@ class Node(TokenLogicMixin, CommandsMixin):
         EVAL_FIRST_TOKEN, protegida por observed_activity.
         """
         self.is_controller = self.ring.is_controller(self.apelido)
-        if self.is_controller and self.first_token_generated:
-            self.monitor.set_enabled(True)
-        elif not self.is_controller:
+        if self.is_controller:
+            # Uma controladora que entrou tarde tem first_token_generated False, mas
+            # se ja observou atividade (token/dados existem) tambem deve vigiar.
+            self.monitor.set_enabled(self.first_token_generated or self.observed_activity)
+        else:
             self.monitor.set_enabled(False)
+        # Limpa o latch de "sozinho" quando deixamos de estar sozinhos e nao seguramos o token.
+        if not self._is_alone() and not self.has_token:
+            self._segurando_sozinho = False
 
     def _send(self, target_apelido, target_addr, data) -> None:
         """Envia ``data`` ao endereco do alvo (tipicamente o sucessor)."""
@@ -185,6 +210,11 @@ class Node(TokenLogicMixin, CommandsMixin):
         ap, ip, port = suc
         return (ap, (ip, port))
 
+    def _is_alone(self) -> bool:
+        """True se este no eh a unica maquina do anel (sucessor eh ele mesmo ou indefinido)."""
+        suc = self.ring.successor(self.apelido)
+        return suc is None or suc[0] == self.apelido
+
     def _send_to_successor(self, data) -> None:
         ap, addr = self._successor()
         self._send(ap, addr, data)
@@ -198,9 +228,8 @@ class Node(TokenLogicMixin, CommandsMixin):
         self.monitor.set_paused(self.has_token or self.waiting_for_data_return)
 
     def _drop_head(self) -> None:
-        """Remove o item da cabeca da fila (concluido) e limpa o inflight."""
+        """Remove o item da cabeca da fila (concluido)."""
         self.queue.pop()
-        self.inflight = None
 
     # ----------------------------------------------------------- handlers RX
     def _update_member(self, apelido, ip, port) -> str:
@@ -209,6 +238,14 @@ class Node(TokenLogicMixin, CommandsMixin):
         if res == "changed":
             log("[{}] AVISO: '{}' mudou de endereco (rejuncao com novo IP ou colisao de apelido)".format(self.apelido, apelido))
         self._recompute_role()
+        # Estavamos sozinhos segurando o token e outra maquina acabou de entrar: retoma a circulacao.
+        if self.has_token and not self.waiting_for_data_return and not self._is_alone() and self._segurando_sozinho:
+            self._segurando_sozinho = False
+            log("[{}] nova maquina entrou; retomando a circulacao do token".format(self.apelido))
+            if not self.queue.is_empty():
+                self._send_data_packet(self.queue.peek())
+            else:
+                self._forward_token()
         return res
 
     def _on_rx_discover(self, apelido, ip, port) -> None:
@@ -220,6 +257,14 @@ class Node(TokenLogicMixin, CommandsMixin):
     def _on_rx_hello(self, apelido, ip, port) -> None:
         if self._update_member(apelido, ip, port) == "new":
             log("[{}] HELLO de {} (entrou no anel)".format(self.apelido, apelido))
+
+    def _on_rx_leave(self, apelido, ip) -> None:
+        # Saida educada de um par: remove do anel e recalcula o papel. O sucessor
+        # eh calculado ao vivo no proximo envio, entao nao ha trabalho extra.
+        if apelido != self.apelido and apelido in self.ring.members():
+            self.ring.remove(apelido)
+            log("[{}] {} saiu da rede -> recalculando anel".format(self.apelido, apelido))
+            self._recompute_role()
 
     def _on_rx_data(self, parsed, raw) -> None:
         o = parsed["origem"]
@@ -244,7 +289,10 @@ class Node(TokenLogicMixin, CommandsMixin):
                 self._drop_head()
             elif ctrl == CTRL_NAK:
                 head = self.queue.peek()
-                if head and not head.retransmit_used:
+                if head is None:
+                    # Cabeca ausente (fila inconsistente): libera o token sem travar.
+                    log("[{}] NAK recebido mas fila vazia -> liberando token".format(self.apelido))
+                elif not head.retransmit_used:
                     # Spec: retransmite exatamente uma vez, agora sem injetar falha.
                     head.retransmit_used = True
                     head.no_error = True
@@ -253,8 +301,10 @@ class Node(TokenLogicMixin, CommandsMixin):
                     log("[{}] NAK novamente apos retransmissao unica -> descartando msg (spec: retransmite apenas uma vez)".format(self.apelido))
                     self._drop_head()
             else:
-                # Controle inesperado de volta a origem: nao libera (mantem estado).
-                release = False
+                # Controle inesperado de volta a origem: loga, descarta e libera o token.
+                log("[{}] controle inesperado '{}' de volta a origem -> descartando msg e liberando token".format(self.apelido, ctrl))
+                self._drop_head()
+                # release permanece True
             if release:
                 self.waiting_for_data_return = False
                 self._refresh_monitor_pause()
@@ -291,6 +341,7 @@ class Node(TokenLogicMixin, CommandsMixin):
 Node._handlers = {
     "RX_DISCOVER": Node._on_rx_discover,
     "RX_HELLO": Node._on_rx_hello,
+    "RX_LEAVE": Node._on_rx_leave,
     "RX_TOKEN": Node._on_rx_token,
     "RX_DATA": Node._on_rx_data,
     "TIMER_FORWARD_TOKEN": Node._on_timer_forward_token,

@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Relatorio</title>
 <style>
-
 * { box-sizing: border-box; }
 body {
     font-family: Arial, Helvetica, sans-serif;
@@ -99,14 +98,14 @@ a { color: #1a5276; }
 <table>
 <thead><tr><th>Camada</th><th>Pacote</th><th>Responsabilidade</th></tr></thead>
 <tbody>
-<tr><td>Protocolo</td><td><code>ring/protocol/</code></td><td>Formato dos datagramas (<code>packets.py</code>), CRC-32 (<code>crc.py</code>), inserção de falhas (<code>fault.py</code>). Define o "idioma de fio".</td></tr>
+<tr><td>Protocolo</td><td><code>ring/protocol/</code></td><td>Formato dos datagramas (<code>packets.py</code>), CRC-32 (<code>crc.py</code>), inserção de falhas (<code>fault.py</code>). Define o &quot;idioma de fio&quot;.</td></tr>
 <tr><td>Núcleo</td><td><code>ring/core/</code></td><td>Estado da máquina e máquina de estados: <code>node.py</code> (motor), <code>token_logic.py</code>, <code>commands.py</code>, <code>message_queue.py</code>, <code>token_control.py</code>.</td></tr>
 <tr><td>Rede</td><td><code>ring/network/</code></td><td>Transporte UDP (<code>transport.py</code>) e topologia/descoberta do anel (<code>discovery.py</code>).</td></tr>
 <tr><td>Interface</td><td><code>ring/ui/</code></td><td>Log thread-safe e laço de comandos (<code>console.py</code>).</td></tr>
 <tr><td>Entrada</td><td><code>main.py</code></td><td>Parsing de argumentos, leitura de config/peers, criação e arranque do <code>Node</code>.</td></tr>
 </tbody></table>
 <h3>Modelo central: uma thread de motor sobre um barramento de eventos</h3>
-<p>O ponto arquitetural mais importante é que <strong>todo o estado mutável da máquina vive no objeto <code>Node</code> e é alterado por UMA única thread</strong>, o <em>motor</em> (<code>Node._engine_loop</code>). As demais threads (receptora UDP, vigia do token, console, <code>threading.Timer</code>) <strong>nunca tocam o estado</strong>: elas apenas <strong>postam eventos</strong> num <code>queue.Queue</code> (o barramento, <code>Node.bus</code>) via <code>Node.post(...)</code>. O motor consome o barramento em laço e despacha cada evento para um handler através da tabela <code>Node._handlers</code>.</p>
+<p>O ponto arquitetural mais importante é que **todo o estado mutável da máquina vive no objeto <code>Node</code> e é alterado por UMA única thread**, o *motor* (<code>Node._engine_loop</code>). As demais threads (receptora UDP, vigia do token, console, <code>threading.Timer</code>) <strong>nunca tocam o estado</strong>: elas apenas <strong>postam eventos</strong> num <code>queue.Queue</code> (o barramento, <code>Node.bus</code>) via <code>Node.post(...)</code>. O motor consome o barramento em laço e despacha cada evento para um handler através da tabela <code>Node._handlers</code>.</p>
 <p>Consequência direta: como o barramento serializa todos os eventos, as mutações de estado acontecem em série, numa só thread, e <strong>não é preciso lock algum sobre o estado</strong>.</p>
 <p>Fluxo textual de um datagrama recebido até virar ação:</p>
 <pre><code>                 +------------------+        post(evento)        +------------------+
@@ -164,9 +163,9 @@ a { color: #1a5276; }
 <li><code>waiting_for_data_return</code> — enviou DADOS e aguarda o retorno à origem (segura o token);</li>
 <li><code>epoch</code> (contador) — invalida <code>Timer</code>s obsoletos quando o token muda (regerado/retirado/topologia);</li>
 <li><code>expect_token_return</code> — primeira volta após (re)gerar o token, para isentar a detecção de duplicata;</li>
-<li><code>inflight</code> — <code>QueueItem</code> que está circulando agora;</li>
 <li><code>observed_activity</code> — já viu token ou dados (impede gerar token inicial à toa);</li>
 <li><code>first_token_generated</code> — já houve geração do token inicial;</li>
+<li><code>tokens_perdidos</code>, <code>tokens_duplicados</code> — contadores de tokens perdidos/duplicados detectados (expostos no <code>status</code>);</li>
 <li><code>is_controller</code>, <code>last_token_rx</code> (instante monotônico do último token aceito como controladora).</li>
 </ul>
 <hr>
@@ -175,9 +174,9 @@ a { color: #1a5276; }
 <thead><tr><th>Thread</th><th>Onde nasce</th><th>Papel</th></tr></thead>
 <tbody>
 <tr><td><strong>receptora (rx)</strong></td><td><code>Transport.start</code></td><td>Bloqueia em <code>recvfrom(2048)</code>; ao chegar datagrama, chama <code>on_datagram</code>, que faz <code>parse</code> e <strong>posta</strong> o evento de RX correspondente. Encerra quando o socket fecha.</td></tr>
-<tr><td><strong>motor (engine)</strong></td><td><code>Node.start</code></td><td>Único dono do estado. Laço <code>bus.get()</code> -> <code>_handlers[etype]</code>. Toda lógica de protocolo, token e comandos roda aqui, em série.</td></tr>
+<tr><td><strong>motor (engine)</strong></td><td><code>Node.start</code></td><td>Único dono do estado. Laço <code>bus.get()</code> -&gt; <code>_handlers[etype]</code>. Toda lógica de protocolo, token e comandos roda aqui, em série.</td></tr>
 <tr><td><strong>TokenMonitor (token-monitor)</strong></td><td><code>Node.__init__</code>/<code>monitor.start</code></td><td>Vigia do token, <strong>só atua na controladora</strong>. Acorda a cada 0,1 s; se o silêncio (sem token nem dados) passar de <code>token_timeout</code>, posta <code>MON_TOKEN_TIMEOUT</code>.</td></tr>
-<tr><td><strong><code>threading.Timer</code></strong></td><td>em <code>token_logic.py</code> / <code>node.start</code></td><td>Temporizadores pontuais: ritmo do token (<code>TIMER_FORWARD_TOKEN</code> após <code>token_time</code>) e fim da janela de descoberta (<code>EVAL_FIRST_TOKEN</code>). Cada disparo só posta evento.</td></tr>
+<tr><td>**<code>threading.Timer</code>**</td><td>em <code>token_logic.py</code> / <code>node.start</code></td><td>Temporizadores pontuais: ritmo do token (<code>TIMER_FORWARD_TOKEN</code> após <code>token_time</code>) e fim da janela de descoberta (<code>EVAL_FIRST_TOKEN</code>). Cada disparo só posta evento.</td></tr>
 <tr><td><strong>console</strong></td><td>thread principal, <code>Console.run</code></td><td>Lê <code>stdin</code>, traduz comandos em <code>CMD_*</code> e posta. Nunca toca o estado.</td></tr>
 </tbody></table>
 <hr>
@@ -201,14 +200,16 @@ a { color: #1a5276; }
 <h2>6. Mecanismos de sincronização (seção exigida)</h2>
 <p>A sincronização <strong>não</strong> usa locks sobre o estado. Ela se apoia em três peças:</p>
 <ol>
-<li><strong>Barramento thread-safe <code>queue.Queue</code></strong> (<code>Node.bus</code>). Todas as threads externas (rx, monitor, console, timers) apenas <strong>postam</strong> eventos; o motor é a <strong>única</strong> thread que lê o barramento e muta o estado. Isso <strong>serializa todas as mutações</strong> numa só thread, eliminando condições de corrida e a necessidade de locks. <code>queue.Queue</code> já é internamente sincronizada para o par produtor/consumidor.</li>
+<li>**Barramento thread-safe <code>queue.Queue</code>** (<code>Node.bus</code>). Todas as threads externas (rx, monitor, console, timers) apenas <strong>postam</strong> eventos; o motor é a <strong>única</strong> thread que lê o barramento e muta o estado. Isso <strong>serializa todas as mutações</strong> numa só thread, eliminando condições de corrida e a necessidade de locks. <code>queue.Queue</code> já é internamente sincronizada para o par produtor/consumidor.</li>
 </ol>
 <ol>
-<li><strong>Contador <code>epoch</code></strong> — invalida <code>Timer</code>s obsoletos. Quando o token é regenerado (<code>_generate_token</code>), retirado (<code>_on_cmd_remove_token</code>) ou um duplicado é consumido (<code>_on_rx_token</code>), <code>epoch</code> é incrementado. Os timers do token carregam a época em que foram criados (<code>ep = self.epoch</code>); ao disparar, <code>_on_timer_forward_token</code> só age se <code>ep == self.epoch</code>. Assim, um timer agendado antes de uma mudança de topologia/token "morre" silenciosamente em vez de encaminhar um token que já não deveria existir.</li>
+<li>**Contador <code>epoch</code>** — invalida <code>Timer</code>s obsoletos. Quando o token é regenerado (<code>_generate_token</code>), retirado (<code>_on_cmd_remove_token</code>) ou um duplicado é consumido (<code>_on_rx_token</code>), <code>epoch</code> é incrementado. Os timers do token carregam a época em que foram criados (<code>ep = self.epoch</code>); ao disparar, <code>_on_timer_forward_token</code> só age se <code>ep == self.epoch</code>. Assim, um timer agendado antes de uma mudança de topologia/token &quot;morre&quot; silenciosamente em vez de encaminhar um token que já não deveria existir.</li>
 </ol>
 <ol>
 <li><strong>Lock de impressão</strong> (<code>ring/ui/console._print_lock</code>). Como rx, monitor e motor podem imprimir simultaneamente, <code>log()</code> envolve o <code>print</code> num <code>threading.Lock</code>, garantindo linhas atômicas (sem entrelaçamento). É a única exclusão mútua explícita do sistema, e protege apenas a saída, não o estado.</li>
 </ol>
+<h3>Robustez do motor</h3>
+<p>O laço do motor (<code>_engine_loop</code>) envolve cada despacho de handler em <code>try/except Exception</code>, registrando o <code>traceback</code> e seguindo para o próximo evento. Assim, um pacote malformado ou estranho (por exemplo, de outro grupo durante a interoperação) <strong>não derruba a thread do motor nem congela o nó</strong>. Complementando, o caminho de retorno à origem em <code>_on_rx_data</code> <strong>sempre libera/encaminha o token</strong>, inclusive quando o <code>controle</code> que volta é inesperado (ou um NAK chega com a fila vazia): o token nunca fica preso por um valor de controle desconhecido, o que importa para interoperar com implementações de outros grupos.</p>
 <hr>
 <h2>7. Protocolo e formato dos pacotes (interoperabilidade)</h2>
 <p>Todo o tráfego é montado/desmontado em <code>ring/protocol/packets.py</code>. O cabeçalho é texto ASCII com campos separados por <code>:</code>; a <strong>mensagem</strong> de DADOS permanece em <strong>bytes crus</strong> e pode conter <code>:</code>.</p>
@@ -217,17 +218,19 @@ a { color: #1a5276; }
 <tbody>
 <tr><td>DISCOVER</td><td><code>10</code></td><td><code>10:&lt;apelido&gt;:&lt;ip&gt;</code></td><td>apelido e IP da origem</td></tr>
 <tr><td>HELLO</td><td><code>20</code></td><td><code>20:&lt;apelido&gt;:&lt;ip&gt;</code></td><td>apelido e IP da origem</td></tr>
+<tr><td>LEAVE</td><td><code>30</code></td><td><code>30:&lt;apelido&gt;:&lt;ip&gt;</code></td><td>apelido e IP de quem sai (extensão local)</td></tr>
 <tr><td>TOKEN</td><td><code>1000</code></td><td><code>1000</code></td><td>nenhum (payload é só <code>1000</code>)</td></tr>
 <tr><td>DADOS</td><td><code>2000</code></td><td><code>2000:&lt;origem&gt;:&lt;destino&gt;:&lt;controle&gt;:&lt;crc&gt;:&lt;mensagem&gt;</code></td><td>origem, destino, controle, CRC, mensagem</td></tr>
 </tbody></table>
 <p>Valores do campo <code>controle</code>: <code>maquinainexistente</code> (CTRL_NONE, estado inicial), <code>ACK</code>, <code>NAK</code>.</p>
+<blockquote><p><strong>Honestidade sobre o LEAVE</strong>: o pacote <code>30:&lt;apelido&gt;:&lt;ip&gt;</code> é uma <strong>extensão local</strong> desta implementação para a saída educada (<code>quit</code>). Ele <strong>não faz parte do protocolo de fio do enunciado</strong>: outros grupos não o enviam e, ao recebê-lo, o tratam como datagrama desconhecido (<code>UNKNOWN</code>) e o <strong>ignoram com segurança</strong>. Apenas os nossos próprios nós o honram (<code>_on_rx_leave</code>). Portanto o LEAVE <strong>não afeta a interoperabilidade</strong>.</p></blockquote>
 <p>Exemplo real de DADOS (formato do enunciado): <code>2000:B:A:maquinainexistente:19385749:Oi pessoal!</code>.</p>
 <p>Detalhes de implementação relevantes para interoperar:</p>
 <ul>
 <li><strong>Construção em bytes</strong>: cada construtor (<code>build_discover</code>, <code>build_hello</code>, <code>build_token</code>, <code>build_data</code>) retorna <code>bytes</code> prontos para o socket; a mensagem é anexada <strong>literalmente</strong> (<code>cabecalho + message</code>), sem escape.</li>
-<li><strong>Parsing com <code>maxsplit</code></strong>: <code>parse</code> usa <code>datagram.split(b&quot;:&quot;, 5)</code> para DADOS, de modo que <code>partes[5]</code> contém a mensagem inteira mesmo que ela tenha <code>:</code>. DISCOVER/HELLO usam <code>split(b&quot;:&quot;, 2)</code>.</li>
-<li><strong><code>set_controle</code></strong>: troca <strong>apenas</strong> o campo de controle (<code>partes[3]</code>), preservando CRC e mensagem; usa <code>split(b&quot;:&quot;, 5)</code> e rejunta. É a única alteração que um nó faz num DATA que não é seu.</li>
-<li><strong>Tolerância a <code>\x00</code> final</strong>: <code>parse</code> remove <strong>um</strong> byte <code>b&quot;\x00&quot;</code> ao final, se houver. O cliente C++ de referência envia <code>strlen+1</code> (inclui o NUL terminador); descartá-lo evita corromper a interpretação e mantém a interoperabilidade.</li>
+<li>**Parsing com <code>maxsplit</code>**: <code>parse</code> usa <code>datagram.split(b&quot;:&quot;, 5)</code> para DADOS, de modo que <code>partes[5]</code> contém a mensagem inteira mesmo que ela tenha <code>:</code>. DISCOVER/HELLO usam <code>split(b&quot;:&quot;, 2)</code>.</li>
+<li>**<code>set_controle</code><strong>: troca </strong>apenas** o campo de controle (<code>partes[3]</code>), preservando CRC e mensagem; usa <code>split(b&quot;:&quot;, 5)</code> e rejunta. É a única alteração que um nó faz num DATA que não é seu.</li>
+<li>**Tolerância a <code>\x00</code> final**: <code>parse</code> remove <strong>um</strong> byte <code>b&quot;\x00&quot;</code> ao final, se houver. O cliente C++ de referência envia <code>strlen+1</code> (inclui o NUL terminador); descartá-lo evita corromper a interpretação e mantém a interoperabilidade.</li>
 <li><strong>Classificação</strong>: TOKEN é reconhecido quando o payload inteiro é <code>b&quot;1000&quot;</code>; os demais pelo prefixo antes do primeiro <code>:</code>. Datagramas fora do contrato viram <code>UNKNOWN</code> e são ignorados.</li>
 </ul>
 <hr>
@@ -236,7 +239,7 @@ a { color: #1a5276; }
 <li>Ao subir (<code>Node.start</code>), o nó registra a si mesmo no <code>Ring</code> e envia <strong>DISCOVER em broadcast</strong>. No modo LAN o broadcast vai para <code>255.255.255.255</code> na <strong>porta 6000</strong>; no modo local, é simulado enviando uma cópia a cada peer conhecido.</li>
 <li>Quem recebe DISCOVER (<code>_on_rx_discover</code>) atualiza o anel e responde <strong>HELLO</strong> em broadcast, identificando-se.</li>
 <li>Quem recebe HELLO (<code>_on_rx_hello</code>) registra o novo membro.</li>
-<li>A ordem do anel é a <strong>ordenação por <code>(apelido, ip)</code></strong> (<code>Ring.order</code>) — apelido como chave primária (ordem alfabética), ip apenas como desempate determinístico. Cada nó calcula o <strong>sucessor</strong> circular com <code>Ring.successor</code>.</li>
+<li>A ordem do anel é a **ordenação por <code>(apelido, ip)</code>** (<code>Ring.order</code>) — apelido como chave primária (ordem alfabética), ip apenas como desempate determinístico. Cada nó calcula o <strong>sucessor</strong> circular com <code>Ring.successor</code>.</li>
 <li>A <strong>controladora</strong> é o <strong>menor apelido</strong> (<code>Ring.controller_apelido</code>), eleita implicitamente por todos verem o mesmo conjunto.</li>
 </ol>
 <p>Supressão de eco: em <code>on_datagram</code>, um DISCOVER/HELLO cujo apelido é o próprio é descartado (o broadcast volta para quem enviou).</p>
@@ -251,10 +254,10 @@ a { color: #1a5276; }
 <h3>CRC (<code>ring/protocol/crc.py</code>)</h3>
 <ul>
 <li><code>crc32(data)</code> usa <code>zlib.crc32(data) &amp; 0xFFFFFFFF</code> — <strong>CRC-32 padrão IEEE 802.3</strong>, o mesmo de <code>java.util.zip.CRC32</code> e das implementações CRC32 comuns em C++, garantindo valor byte-a-byte idêntico entre grupos.</li>
-<li><strong>Escopo</strong>: o CRC é calculado <strong>somente sobre os bytes do campo <code>&lt;mensagem&gt;</code></strong> (<code>item.message_bytes</code> no envio; <code>parsed[&quot;message&quot;]</code> na verificação).</li>
+<li><strong>Escopo</strong>: o CRC é calculado **somente sobre os bytes do campo <code>&lt;mensagem&gt;</code>** (<code>item.message_bytes</code> no envio; <code>parsed[&quot;message&quot;]</code> na verificação).</li>
 <li><strong>Representação</strong>: vai na rede como <strong>string decimal</strong> (<code>crc_field</code> faz <code>str(crc32(...))</code>).</li>
 <li><code>matches(data, field)</code> recalcula e compara, aceitando <code>field</code> em <code>str</code> ou <code>bytes</code>; qualquer erro de conversão é tratado como campo inválido (<code>False</code>).</li>
-<li><strong>Observação sobre o exemplo do enunciado</strong>: o valor <code>19385749</code> que aparece no exemplo <code>...:19385749:Oi pessoal!</code> é <strong>ilustrativo</strong>. O CRC-32 real de <code>&quot;Oi pessoal!&quot;</code> é <strong><code>1751094473</code></strong>, verificado no auto-teste de <code>crc.py</code> (<code>assert crc_field(b&quot;Oi pessoal!&quot;) == &quot;1751094473&quot;</code>).</li>
+<li><strong>Observação sobre o exemplo do enunciado</strong>: o valor <code>19385749</code> que aparece no exemplo <code>...:19385749:Oi pessoal!</code> é <strong>ilustrativo</strong>. O CRC-32 real de <code>&quot;Oi pessoal!&quot;</code> é **<code>1751094473</code>**, verificado no auto-teste de <code>crc.py</code> (<code>assert crc_field(b&quot;Oi pessoal!&quot;) == &quot;1751094473&quot;</code>).</li>
 </ul>
 <h3>Módulo de falhas (<code>ring/protocol/fault.py</code>)</h3>
 <ul>
@@ -265,22 +268,22 @@ a { color: #1a5276; }
 </ul>
 <hr>
 <h2>10. Fila de mensagens</h2>
-<p>Cada máquina tem uma <code>MessageQueue</code> (FIFO, até <strong>10</strong> itens). Cada item carrega o <strong>apelido de destino</strong> próprio (<code>QueueItem.destino</code>), atendendo "para cada mensagem adicionada, deve ser armazenado também o apelido da máquina destino". A máquina só transmite quando está com o token, retirando da cabeça (<code>peek</code>/<code>pop</code>).</p>
+<p>Cada máquina tem uma <code>MessageQueue</code> (FIFO, até <strong>10</strong> itens). Cada item carrega o <strong>apelido de destino</strong> próprio (<code>QueueItem.destino</code>), atendendo &quot;para cada mensagem adicionada, deve ser armazenado também o apelido da máquina destino&quot;. A máquina só transmite quando está com o token, retirando da cabeça (<code>peek</code>/<code>pop</code>).</p>
 <hr>
 <h2>11. Funcionamento do token e dos dados</h2>
 <h3>Ciclo do token (<code>TokenLogicMixin._on_rx_token</code>)</h3>
 <p>Ao receber o token, <code>has_token = True</code>. Então:</p>
 <ul>
-<li><strong>Fila vazia</strong>: segura o token por <code>token_time</code> e agenda <code>TIMER_FORWARD_TOKEN</code> (com a época atual); ao disparar, <code>_forward_token</code> envia o token ao sucessor.</li>
+<li><strong>Fila vazia</strong>: segura o token por <code>token_time</code> e agenda <code>TIMER_FORWARD_TOKEN</code> (com a época atual); ao disparar, <code>_on_timer_forward_token</code> reavalia a fila: se uma mensagem foi enfileirada <strong>durante</strong> a janela de retenção (intervalo de ritmo), os dados são transmitidos no próprio tique (<code>_send_data_packet(peek())</code>); caso contrário, <code>_forward_token</code> envia o token ao sucessor. Assim nenhuma mensagem é perdida e o token nunca fica preso por ter sido enfileirado um envio enquanto o nó o segurava.</li>
 <li><strong>Fila não vazia</strong>: chama <code>_send_data_packet(head)</code> e <strong>segura o token</strong> até os dados voltarem (não encaminha agora).</li>
 </ul>
 <h3>Emissão de DADOS (<code>_send_data_packet</code>)</h3>
-<p>Calcula o CRC da mensagem original, aplica <code>maybe_corrupt</code> (respeitando <code>skip</code>), monta o DATA com controle <code>maquinainexistente</code>, marca <code>inflight</code>/<code>waiting_for_data_return</code>, <strong>pausa o monitor</strong> se for controladora, e envia ao sucessor.</p>
+<p>Calcula o CRC da mensagem original, aplica <code>maybe_corrupt</code> (respeitando <code>skip</code>), monta o DATA com controle <code>maquinainexistente</code>, marca <code>waiting_for_data_return</code>, <strong>pausa o monitor</strong> se for controladora, e envia ao sucessor.</p>
 <h3>Tratamento na origem (<code>_on_rx_data</code>, ramo <code>o == self.apelido</code>)</h3>
 <p>O datagrama deu a volta. Conforme o controle:</p>
 <ul>
-<li><strong>BROADCAST</strong>: imprime "BROADCAST concluído", remove da fila (<code>_drop_head</code>) e libera o token;</li>
-<li><strong>ACK</strong>: "mensagem entregue com sucesso", remove da fila e libera;</li>
+<li><strong>BROADCAST</strong>: imprime &quot;BROADCAST concluído&quot;, remove da fila (<code>_drop_head</code>) e libera o token;</li>
+<li><strong>ACK</strong>: &quot;mensagem entregue com sucesso&quot;, remove da fila e libera;</li>
 <li><strong>maquinainexistente</strong> (CTRL_NONE): destino ausente/desligado, remove da fila e libera;</li>
 <li><strong>NAK</strong>: se o item ainda não foi retransmitido, marca <code>retransmit_used=True</code> e <code>no_error=True</code> (reenvio <strong>sem injeção</strong> na próxima passagem do token) e libera; se já houve a retransmissão única, descarta a mensagem e libera.</li>
 </ul>
@@ -296,25 +299,27 @@ a { color: #1a5276; }
 <hr>
 <h2>12. Controle do token</h2>
 <h3>Token perdido (timeout)</h3>
-<p>O <code>TokenMonitor</code> roda <strong>só na controladora</strong> (<code>set_enabled</code> ligado quando <code>is_controller</code> e já houve token). O relógio de liveness é <strong>resetado por qualquer atividade observada no anel</strong>: a própria thread receptora chama <code>monitor.note_activity()</code> para <strong>todo datagrama de token ou dados</strong> que vê (em <code>on_datagram</code>, antes mesmo de o motor processar), e o motor também o faz a cada RX/envio/encaminhamento. Assim, um token saudável que está <strong>parado/circulando em nós a jusante</strong> mantém o relógio vivo e <strong>não</strong> é declarado perdido.</p>
+<p>O <code>TokenMonitor</code> roda <strong>só na controladora</strong>. O <code>set_enabled</code> é ligado quando o nó <strong>é controladora E</strong> (<code>first_token_generated</code> <strong>OU</strong> <code>observed_activity</code>) — ver <code>_recompute_role</code>. A condição <code>observed_activity</code> cobre um caso real: uma máquina que <strong>se torna controladora ao entrar tarde</strong> (apelido menor que os já presentes) tem <code>first_token_generated == False</code>, mas, como já viu token/dados circulando, <strong>também passa a vigiar</strong> o token perdido. Trecho real (<code>tests/log_latejoin_A.txt</code>), em que A entra depois, vira controladora e detecta o token sumido:</p>
+<pre><code>[A] TOKEN PERDIDO detectado (timeout) -&gt; gerando novo token</code></pre>
+<p>O relógio de liveness é <strong>resetado por qualquer atividade observada no anel</strong>: a própria thread receptora chama <code>monitor.note_activity()</code> para <strong>todo datagrama de token ou dados</strong> que vê (em <code>on_datagram</code>, antes mesmo de o motor processar), e o motor também o faz a cada RX/envio/encaminhamento. Assim, um token saudável que está <strong>parado/circulando em nós a jusante</strong> mantém o relógio vivo e <strong>não</strong> é declarado perdido.</p>
 <p>Além disso, o monitor é <strong>pausado</strong> sempre que o token está comprovadamente na controladora. O helper <code>_refresh_monitor_pause()</code> aplica <code>set_paused(self.has_token or self.waiting_for_data_return)</code> e é chamado logo após qualquer mudança de <code>has_token</code> ou <code>waiting_for_data_return</code>. Ou seja, a vigilância fica suspensa tanto enquanto a controladora <strong>detém o token</strong> (<code>has_token</code>) quanto durante o <strong>round-trip dos seus próprios dados</strong> (<code>waiting_for_data_return</code>), e só retoma quando o token de fato saiu daqui. Se o silêncio passar de <code>token_timeout</code>, o monitor posta <code>MON_TOKEN_TIMEOUT</code>; <code>_on_mon_token_timeout</code> regenera o token <strong>somente se</strong> há mais de um membro (<code>len(members) &gt; 1</code>) e não há transmissão de dados em curso (<code>not waiting_for_data_return</code>).</p>
-<p>Em conjunto, essas duas peças (relógio resetado por atividade + pausa enquanto o token está aqui) fazem a controladora regenerar um token <strong>apenas quando ele está genuinamente perdido</strong>, eliminando o falso "token perdido" durante a circulação normal ou com o token estacionado em outro nó.</p>
+<p>Em conjunto, essas duas peças (relógio resetado por atividade + pausa enquanto o token está aqui) fazem a controladora regenerar um token <strong>apenas quando ele está genuinamente perdido</strong>, eliminando o falso &quot;token perdido&quot; durante a circulação normal ou com o token estacionado em outro nó.</p>
 <h3>Token duplicado</h3>
-<p>Detectado <strong>no nó</strong>, em <code>_on_rx_token</code> (controladora). Se o intervalo entre dois tokens consecutivos for menor que <code>min_token_interval</code>, conclui-se que há mais de um token circulando: o nó <strong>consome o token excedente</strong> (retorna sem encaminhar) e <strong>atualiza <code>last_token_rx</code></strong> com o instante atual, para medir corretamente o intervalo até o próximo token genuíno. Esse caminho <strong>não incrementa <code>epoch</code></strong>: o token real já está aqui e possui um <code>TIMER_FORWARD_TOKEN</code> pendente com a época atual; bumpar <code>epoch</code> cancelaria esse timer e mataria o anel. Consumir silenciosamente o excedente é suficiente e preserva a circulação. A <strong>primeira volta</strong> logo após uma (re)geração do token é isentada por <code>expect_token_return</code> (o primeiro retorno não conta como duplicata).</p>
+<p>Detectado <strong>no nó</strong>, em <code>_on_rx_token</code> (controladora). A detecção é <strong>temporal (heurística)</strong>: se o intervalo entre dois tokens consecutivos for menor que <code>min_token_interval</code>, conclui-se que há mais de um token circulando. O nó <strong>consome o token excedente</strong> (retorna sem encaminhar) e **atualiza <code>last_token_rx</code><strong> com o instante atual, para medir corretamente o intervalo até o próximo token genuíno. Esse caminho </strong>não incrementa <code>epoch</code>**: o token real já está aqui e possui um <code>TIMER_FORWARD_TOKEN</code> pendente com a época atual; bumpar <code>epoch</code> cancelaria esse timer e mataria o anel. Consumir silenciosamente o excedente é suficiente e preserva a circulação. A <strong>primeira volta</strong> logo após uma (re)geração do token é isentada por <code>expect_token_return</code> (o primeiro retorno não conta como duplicata); além disso, <code>_generate_token</code> **reseta <code>last_token_rx</code>** no instante da geração, criando uma baseline fresca para que um timestamp antigo não julgue mal a chegada do próximo token. Como o método é heurístico, recomenda-se configurar <code>tempo_minimo_entre_tokens</code> entre <strong>~metade</strong> e <strong>a volta inteira</strong> do anel: assim um único token (que retorna a cada ~volta) nunca é flagrado, enquanto dois tokens co-circulando (que chegam ~meia-volta apart) são.</p>
 <h3>Geração e retirada manuais</h3>
-<p><code>gentoken</code>/<code>addtoken</code> -> <code>_on_cmd_add_token</code> -> <code>_generate_token</code> (incrementa época, marca <code>first_token_generated</code>, envia token ao sucessor) — funciona em <strong>qualquer máquina</strong>. <code>removetoken</code>/<code>rmtoken</code> -> <code>_on_cmd_remove_token</code>: <strong>só remove quando o nó realmente detém o token</strong> — nesse caso larga-o (<code>has_token = False</code>), incrementa <code>epoch</code> e atualiza a pausa do monitor; se o nó <strong>não</strong> está com o token, nada é feito (loga "nada a retirar") e <code>epoch</code> <strong>não</strong> é tocado, pois bumpar a época sem ter o token invalidaria timers de encaminhamento legítimos pendentes em outros nós.</p>
+<p><code>gentoken</code>/<code>addtoken</code> -&gt; <code>_on_cmd_add_token</code> -&gt; <code>_generate_token</code> (incrementa época, marca <code>first_token_generated</code>, envia token ao sucessor) — funciona em <strong>qualquer máquina</strong>. <code>removetoken</code>/<code>rmtoken</code> -&gt; <code>_on_cmd_remove_token</code>: <strong>só remove quando o nó realmente detém o token</strong> — nesse caso larga-o (<code>has_token = False</code>), incrementa <code>epoch</code> e atualiza a pausa do monitor; se o nó <strong>não</strong> está com o token, nada é feito (loga &quot;nada a retirar&quot;) e <code>epoch</code> <strong>não</strong> é tocado, pois bumpar a época sem ter o token invalidaria timers de encaminhamento legítimos pendentes em outros nós.</p>
 <h3>Handoff de controlador</h3>
 <p>Quando a topologia muda, <code>_recompute_role</code> reavalia <code>is_controller</code> (menor apelido) e liga/desliga o monitor de acordo, sem reinicialização.</p>
 <p>Trechos reais (<code>tests/log_A.txt</code>): a controladora A larga o token com <code>removetoken</code> e, esgotado o <code>token_timeout</code> sem atividade, detecta o silêncio e regenera:</p>
 <pre><code>[A] token retirado da rede
 [A] TOKEN PERDIDO detectado (timeout) -&gt; gerando novo token
 [A] gerou/inseriu um token na rede</code></pre>
-<p>(O monitor só atua em A porque A é a controladora — menor apelido do anel <code>[&#x27;A&#x27;,&#x27;B&#x27;,&#x27;C&#x27;]</code>. A tentativa de <code>removetoken</code> num nó que não está com o token apenas loga "nao estou com o token no momento (nada a retirar)", como em <code>tests/log_C.txt</code>.)</p>
+<p>(O monitor só atua em A porque A é a controladora — menor apelido do anel <code>[&#x27;A&#x27;,&#x27;B&#x27;,&#x27;C&#x27;]</code>. A tentativa de <code>removetoken</code> num nó que não está com o token apenas loga &quot;nao estou com o token no momento (nada a retirar)&quot;, como em <code>tests/log_C.txt</code>.)</p>
 <hr>
 <h2>13. Unicast e broadcast</h2>
 <ul>
 <li><strong>Unicast</strong>: <code>send &lt;apelido&gt; &lt;mensagem&gt;</code> enfileira com destino específico. Ao circular, intermediários repassam verbatim; o destino confere CRC e marca ACK/NAK; a origem trata o retorno (Seção 11).</li>
-<li><strong>Broadcast</strong>: <code>send BROADCAST &lt;mensagem&gt;</code>. Regras (conforme o enunciado e o código): o módulo de falhas <strong>mantém</strong> <code>maquinainexistente</code> (não injeta erro: <code>skip</code> por <code>is_bcast</code>); <strong>todos imprimem</strong> a mensagem (<code>[X] BROADCAST de O: &quot;...&quot;</code>); o pacote <strong>retorna à origem</strong>, que loga "BROADCAST concluído" e libera o token.</li>
+<li><strong>Broadcast</strong>: <code>send BROADCAST &lt;mensagem&gt;</code>. Regras (conforme o enunciado e o código): o módulo de falhas <strong>mantém</strong> <code>maquinainexistente</code> (não injeta erro: <code>skip</code> por <code>is_bcast</code>); <strong>todos imprimem</strong> a mensagem (<code>[X] BROADCAST de O: &quot;...&quot;</code>); o pacote <strong>retorna à origem</strong>, que loga &quot;BROADCAST concluído&quot; e libera o token.</li>
 </ul>
 <p>Trecho real (broadcast em todas as máquinas — <code>tests/log_A.txt</code>, <code>tests/log_B.txt</code>, <code>tests/log_C.txt</code>):</p>
 <pre><code>[A] BROADCAST de C: &quot;Ola galera&quot;
@@ -323,7 +328,11 @@ a { color: #1a5276; }
 [C] BROADCAST concluido (deu a volta no anel)</code></pre>
 <hr>
 <h2>14. Alteração topológica do anel</h2>
-<p>Máquinas podem <strong>entrar em execução</strong>: ao subir (ou via comando <code>join</code>/<code>discover</code>), enviam DISCOVER; as demais respondem HELLO. <code>_update_member</code> chama <code>Ring.update</code> e <code>_recompute_role</code>, recomputando <strong>sucessor</strong> e <strong>controladora</strong> a partir do novo conjunto, <strong>sem reinicialização</strong>. Se um apelido reaparece com endereço diferente, <code>Ring.update</code> retorna <code>&quot;changed&quot;</code> e o nó avisa ("mudou de endereço"). O enunciado prevê entrada "quando somente o token estiver circulando"; a topologia é reavaliada de forma incremental a cada DISCOVER/HELLO.</p>
+<p>Máquinas podem <strong>entrar em execução</strong>: ao subir (ou via comando <code>join</code>/<code>discover</code>), enviam DISCOVER; as demais respondem HELLO. <code>_update_member</code> chama <code>Ring.update</code> e <code>_recompute_role</code>, recomputando <strong>sucessor</strong> e <strong>controladora</strong> a partir do novo conjunto, <strong>sem reinicialização</strong>. Se um apelido reaparece com endereço diferente, <code>Ring.update</code> retorna <code>&quot;changed&quot;</code> e o nó avisa (&quot;mudou de endereço&quot;).</p>
+<p>Além da entrada, uma máquina que <strong>sai limpa</strong> (comando <code>quit</code>) agora difunde um <strong>LEAVE</strong> em broadcast (em <code>_shutdown</code>, com o socket ainda aberto). Quem recebe (<code>_on_rx_leave</code>) chama <code>Ring.remove</code>, recomputa sucessor/controladora (<code>_recompute_role</code>) e o anel <strong>se cura sozinho</strong> entre os nossos nós — por exemplo, <code>A-&gt;B-&gt;C-&gt;A</code> passa a <code>A-&gt;C-&gt;A</code>. Trecho real (<code>tests/log_leave_A.txt</code>), quando B sai e A reconstrói o anel:</p>
+<pre><code>[A] B saiu da rede -&gt; recalculando anel</code></pre>
+<p>Limitação declarada com franqueza: um <strong>CRASH abrupto</strong> (queda sem enviar LEAVE) <strong>não</strong> é curado automaticamente. A expulsão unilateral por timeout foi <strong>deliberadamente evitada</strong>: num anel compartilhado com outros grupos, cada nó perceberia silêncios diferentes e removeria membros distintos, <strong>divergindo a topologia</strong> entre as máquinas; a recuperação de um crash é, portanto, <strong>re-sincronização manual</strong> (subir o nó de novo / <code>join</code>). Pela mesma razão de anel compartilhado, o &quot;portão&quot; de entrada do enunciado (&quot;nova máquina só entra quando somente o token estiver circulando&quot;) é tratado como <strong>disciplina do operador</strong>, não imposto pelo código: a topologia é reavaliada de forma incremental a cada DISCOVER/HELLO.</p>
+<p><strong>Caso degenerado (uma única máquina).</strong> Se as demais máquinas saem e resta <strong>apenas uma</strong> no anel, ela <strong>não</strong> envia o token para si mesma: segura o token <strong>em silêncio</strong> (loga uma vez &quot;sou a unica maquina no anel; segurando o token ate outra entrar&quot;) e volta a circulá-lo assim que outra máquina entra (DISCOVER/HELLO), logando &quot;nova maquina entrou; retomando a circulacao do token&quot;. O enunciado exige no mínimo 3 máquinas, então é um caso degenerado fora do cenário pedido, tratado de forma limpa apenas para evitar um loop inútil do token contra o próprio endereço.</p>
 <hr>
 <h2>15. Arquivo de configuração</h2>
 <p>Cinco linhas, uma informação por linha (<code>ring/config.py</code>):</p>
@@ -340,12 +349,12 @@ a { color: #1a5276; }
 2</code></pre>
 <p>Os números aceitam <strong>vírgula decimal</strong> (<code>2,5</code> = 2.5). São usadas as 5 primeiras linhas não vazias; menos que isso gera <code>ValueError</code>.</p>
 <h3>Ajuste dos dois timers de controle</h3>
-<p><code>timeout_do_token</code> (linha 4) e <code>tempo_minimo_entre_tokens</code> (linha 5) são <strong>relógios locais de cada máquina</strong>, não viajam no fio: cada grupo afina os seus. A volta do anel ("lap") dura aproximadamente <code>numero_de_maquinas x tempo_token_e_dados</code>.</p>
+<p><code>timeout_do_token</code> (linha 4) e <code>tempo_minimo_entre_tokens</code> (linha 5) são <strong>relógios locais de cada máquina</strong>, não viajam no fio: cada grupo afina os seus. A volta do anel (&quot;lap&quot;) dura aproximadamente <code>numero_de_maquinas x tempo_token_e_dados</code>.</p>
 <ul>
-<li><strong><code>timeout_do_token</code></strong> deve ser <strong>maior que a volta</strong>, senão um token saudável estacionado/circulando em nós a jusante seria declarado perdido. Exemplo: 3 máquinas, <code>tempo_token_e_dados=1</code> -> volta ~3 s -> use <code>timeout &gt;= ~8 a 10</code>. (É o valor das execuções de teste: <code>token_timeout=10</code>.)</li>
-<li><strong><code>tempo_minimo_entre_tokens</code></strong> deve ficar <strong>abaixo da volta</strong> mas <strong>acima de ~metade dela</strong> para demonstrar a detecção de duplicata: um único token retorna a cada ~volta (intervalo acima do mínimo, seguro), enquanto dois tokens co-circulando chegam ~meia-volta apart (abaixo do mínimo, flagrados). Exemplo: 3 máquinas, <code>tempo_token_e_dados=1</code>, volta ~3 s -> use <code>min ~2</code>.</li>
+<li>**<code>timeout_do_token</code><strong> deve ser </strong>maior que a volta**, senão um token saudável estacionado/circulando em nós a jusante seria declarado perdido. Exemplo: 3 máquinas, <code>tempo_token_e_dados=1</code> -&gt; volta ~3 s -&gt; use <code>timeout &gt;= ~8 a 10</code>. (É o valor das execuções de teste: <code>token_timeout=10</code>.)</li>
+<li>**<code>tempo_minimo_entre_tokens</code><strong> deve ficar </strong>abaixo da volta<strong> mas </strong>acima de ~metade dela** para demonstrar a detecção de duplicata: um único token retorna a cada ~volta (intervalo acima do mínimo, seguro), enquanto dois tokens co-circulando chegam ~meia-volta apart (abaixo do mínimo, flagrados). Exemplo: 3 máquinas, <code>tempo_token_e_dados=1</code>, volta ~3 s -&gt; use <code>min ~2</code>.</li>
 </ul>
-<blockquote>O <code>config.example.txt</code> acima usa valores ilustrativos curtos; para os cenários de controle prefira <code>timeout_do_token=10</code> e (para exibir duplicata) <code>tempo_minimo_entre_tokens=2</code> com <code>tempo_token_e_dados=1</code> em 3 máquinas, exatamente como nos logs de <code>tests/</code>.</blockquote>
+<blockquote><p>O <code>config.example.txt</code> acima usa valores ilustrativos curtos; para os cenários de controle prefira <code>timeout_do_token=10</code> e (para exibir duplicata) <code>tempo_minimo_entre_tokens=2</code> com <code>tempo_token_e_dados=1</code> em 3 máquinas, exatamente como nos logs de <code>tests/</code>.</p></blockquote>
 <hr>
 <h2>16. Interface e comandos do usuário</h2>
 <p>O <code>Console</code> (thread principal) traduz comandos em eventos:</p>
@@ -355,19 +364,20 @@ a { color: #1a5276; }
 <tr><td><code>send &lt;destino&gt; &lt;msg...&gt;</code></td><td><code>CMD_SEND</code></td><td>Enfileira mensagem (destino = apelido ou <code>BROADCAST</code>).</td></tr>
 <tr><td><code>gentoken</code> / <code>addtoken</code></td><td><code>CMD_ADD_TOKEN</code></td><td>Gera/insere um token na rede.</td></tr>
 <tr><td><code>removetoken</code> / <code>rmtoken</code></td><td><code>CMD_REMOVE_TOKEN</code></td><td>Retira o token da rede.</td></tr>
-<tr><td><code>status</code></td><td><code>CMD_STATUS</code></td><td>Mostra endereço, papel, posse do token, anel, sucessor, fila, etc.</td></tr>
+<tr><td><code>status</code></td><td><code>CMD_STATUS</code></td><td>Mostra endereço, papel, posse do token, anel, sucessor, fila, contadores <code>tokens_perdidos</code>/<code>tokens_duplicados</code>, etc.</td></tr>
 <tr><td><code>queue</code> / <code>fila</code></td><td><code>CMD_QUEUE</code></td><td>Lista a fila (destino, mensagem, flags <code>no_error</code>/<code>retransmit_used</code>).</td></tr>
 <tr><td><code>join</code> / <code>discover</code></td><td><code>CMD_JOIN</code></td><td>Reenvia DISCOVER (atualiza topologia).</td></tr>
 <tr><td><code>help</code> / <code>?</code></td><td>—</td><td>Ajuda.</td></tr>
 <tr><td><code>quit</code> / <code>exit</code> / <code>sair</code></td><td><code>CMD_QUIT</code></td><td>Encerra.</td></tr>
 </tbody></table>
-<p>Atendimento ao requisito "saber o que está acontecendo no anel": cada ação relevante é logada com o prefixo <code>[apelido]</code> — recepção/envio de token ("recebeu o token", "enviando token para X"), envio de dados (com flag <code>corrompido=...</code>), entrega (ACK), NAK/CRC, retransmissão, broadcast, detecção de perdido/duplicado. <code>status</code> mostra <strong>onde está o token</strong> (<code>com_token</code>) e se há dados em trânsito (<code>aguardando_retorno</code>), e <code>queue</code> mostra <strong>onde estão os dados</strong> pendentes.</p>
+<p>Atendimento ao requisito &quot;saber o que está acontecendo no anel&quot;: cada ação relevante é logada com o prefixo <code>[apelido]</code> — recepção/envio de token (&quot;recebeu o token&quot;, &quot;enviando token para X&quot;), envio de dados (com flag <code>corrompido=...</code>), entrega (ACK), NAK/CRC, retransmissão, broadcast, detecção de perdido/duplicado. <code>status</code> mostra <strong>onde está o token</strong> (<code>com_token</code>) e se há dados em trânsito (<code>aguardando_retorno</code>), e <code>queue</code> mostra <strong>onde estão os dados</strong> pendentes. O <code>status</code> também reporta os contadores <code>tokens_perdidos</code> e <code>tokens_duplicados</code>, respondendo diretamente ao item do enunciado &quot;saber se houve token perdido ou se há mais de um token&quot;.</p>
 <p>Trecho real de <code>status</code> (<code>tests/log_A.txt</code>):</p>
 <pre><code>[A] STATUS
   endereco: 127.0.0.1:6001  modo: local
   controladora: True  com_token: False  aguardando_retorno: False
   anel: [&#x27;A&#x27;, &#x27;B&#x27;, &#x27;C&#x27;]
-  sucessor: B  fila: 0  primeiro_token_gerado: True</code></pre>
+  sucessor: B  fila: 0  primeiro_token_gerado: True
+  tokens_perdidos: 0  tokens_duplicados: 0</code></pre>
 <hr>
 <h2>17. Como executar</h2>
 <p>Forma geral (a partir do diretório base):</p>
@@ -398,18 +408,18 @@ C 127.0.0.1 6003</code></pre>
 <pre><code>[A] gerou/inseriu um token na rede
 [A] recebeu o token
 [A] enviando token para B</code></pre>
-<p>e o token seguindo o anel A -> B -> C -> A (<code>tests/log_B.txt</code>, <code>tests/log_C.txt</code>):</p>
+<p>e o token seguindo o anel A -&gt; B -&gt; C -&gt; A (<code>tests/log_B.txt</code>, <code>tests/log_C.txt</code>):</p>
 <pre><code>[B] recebeu o token
 [B] enviando token para C
 [C] recebeu o token
 [C] enviando token para A</code></pre>
-<h3>18.3 Entrega unicast com ACK (B -> A)</h3>
+<h3>18.3 Entrega unicast com ACK (B -&gt; A)</h3>
 <p><code>tests/log_B.txt</code> (origem) e <code>tests/log_A.txt</code> (destino):</p>
 <pre><code>[B] enviando DADOS para A (corrompido=False): &quot;Ola A&quot;
 [B] mensagem entregue com sucesso (ACK)
 [A] DADOS de B: &quot;Ola A&quot; -&gt; ACK</code></pre>
-<h3>18.4 NAK + retransmissão + recuperação (A -> C)</h3>
-<p>A corrompe a mensagem ("Teste erro" -> "Tes?e erro"); C detecta CRC errado e responde NAK; A retransmite a mensagem correta na próxima passagem e obtém ACK.</p>
+<h3>18.4 NAK + retransmissão + recuperação (A -&gt; C)</h3>
+<p>A corrompe a mensagem (&quot;Teste erro&quot; -&gt; &quot;Tes?e erro&quot;); C detecta CRC errado e responde NAK; A retransmite a mensagem correta na próxima passagem e obtém ACK.</p>
 <p><code>tests/log_C.txt</code>:</p>
 <pre><code>[C] CRC NAO confere de A (recebido=2097710523 calculado=2704260576) -&gt; NAK
 [C] DADOS de A: &quot;Tes?e erro&quot; -&gt; NAK
@@ -421,7 +431,7 @@ C 127.0.0.1 6003</code></pre>
 ...
 [A] enviando DADOS para C (corrompido=False): &quot;Teste erro&quot;
 [A] mensagem entregue com sucesso (ACK)</code></pre>
-<h3>18.5 Broadcast em todas as máquinas (C -> todos)</h3>
+<h3>18.5 Broadcast em todas as máquinas (C -&gt; todos)</h3>
 <p><code>tests/log_C.txt</code> (origem), <code>tests/log_A.txt</code> e <code>tests/log_B.txt</code> (recepção):</p>
 <pre><code>[C] enviando DADOS para BROADCAST (corrompido=False): &quot;Ola galera&quot;
 [C] BROADCAST concluido (deu a volta no anel)
@@ -442,8 +452,16 @@ C 127.0.0.1 6003</code></pre>
 <p>E o anel <strong>segue circulando</strong> depois do evento — o próprio B continua recebendo e repassando o token (<code>tests/log_dup_B.txt</code>):</p>
 <pre><code>[B] recebeu o token
 [B] enviando token para C</code></pre>
+<h3>18.8 Saída educada e cura do anel (B sai, A-&gt;C)</h3>
+<p>B encerra com <code>quit</code> e difunde LEAVE; A o remove e recompõe o anel <code>[&#x27;A&#x27;,&#x27;B&#x27;,&#x27;C&#x27;]</code> para <code>[&#x27;A&#x27;,&#x27;C&#x27;]</code>, passando a encaminhar o token direto para C (<code>tests/log_leave_A.txt</code>):</p>
+<pre><code>[A] B saiu da rede -&gt; recalculando anel
+[A] enviando token para C</code></pre>
+<h3>18.9 Controladora que entra tarde vigia o token perdido</h3>
+<p>A entra depois de B e C já circularem o token; por ter o menor apelido, torna-se controladora (<code>first_token_generated</code> ainda <code>False</code>, mas <code>observed_activity</code> <code>True</code>). Quando o token some, A detecta o timeout e regenera (<code>tests/log_latejoin_A.txt</code>):</p>
+<pre><code>[A] TOKEN PERDIDO detectado (timeout) -&gt; gerando novo token
+[A] gerou/inseriu um token na rede</code></pre>
 <hr>
-<h2>19. Mapeamento requisito -> implementação</h2>
+<h2>19. Mapeamento requisito -&gt; implementação</h2>
 <table>
 <thead><tr><th>Requisito (enunciado)</th><th>Onde é atendido</th></tr></thead>
 <tbody>
@@ -455,35 +473,38 @@ C 127.0.0.1 6003</code></pre>
 <tr><td>Arquivo de config (5 linhas, vírgula decimal)</td><td><code>ring/config.py</code></td></tr>
 <tr><td>DISCOVER broadcast porta 6000 + resposta HELLO</td><td><code>Node.start</code>, <code>_on_rx_discover</code>; LAN usa 6000</td></tr>
 <tr><td>Anel em ordem alfabética; primeira máquina gera token</td><td><code>Ring.order</code> (apelido); <code>_on_eval_first_token</code> (menor apelido)</td></tr>
-<tr><td>Token vazio -> repassa; com fila -> envia dados e segura até voltar</td><td><code>_on_rx_token</code>, <code>_send_data_packet</code>, <code>_on_rx_data</code></td></tr>
+<tr><td>Token vazio -&gt; repassa; com fila -&gt; envia dados e segura até voltar</td><td><code>_on_rx_token</code>, <code>_send_data_packet</code>, <code>_on_rx_data</code></td></tr>
 <tr><td><code>maquinainexistente</code>/ACK/NAK na origem</td><td><code>_on_rx_data</code> (ramo origem)</td></tr>
 <tr><td>Recalcular CRC no destino, imprimir origem+mensagem, marcar ACK/NAK</td><td><code>_on_rx_data</code> (ramo destino) + <code>set_controle</code></td></tr>
 <tr><td>CRC32 como controle de erro</td><td><code>ring/protocol/crc.py</code> (zlib)</td></tr>
 <tr><td>Módulo de inserção de falhas com probabilidade do config</td><td><code>ring/protocol/fault.py</code> + <code>_send_data_packet</code></td></tr>
 <tr><td>Fila até 10, com destino por mensagem</td><td><code>MessageQueue.MAX</code>, <code>QueueItem.destino</code></td></tr>
 <tr><td>Unicast e Broadcast (broadcast mantém <code>maquinainexistente</code>)</td><td><code>send</code>; <code>_send_data_packet</code> (<code>skip=is_bcast</code>), <code>_on_rx_data</code></td></tr>
-<tr><td><strong>Deve ser possível</strong>: especificar mensagem a qualquer momento</td><td><code>send</code> -> <code>CMD_SEND</code> -> <code>_on_cmd_send</code></td></tr>
-<tr><td><strong>Deve ser possível</strong>: retirar token a qualquer momento</td><td><code>removetoken</code> -> <code>_on_cmd_remove_token</code></td></tr>
-<tr><td><strong>Deve ser possível</strong>: incluir token a qualquer momento</td><td><code>gentoken</code> -> <code>_on_cmd_add_token</code> -> <code>_generate_token</code></td></tr>
+<tr><td><strong>Deve ser possível</strong>: especificar mensagem a qualquer momento</td><td><code>send</code> -&gt; <code>CMD_SEND</code> -&gt; <code>_on_cmd_send</code></td></tr>
+<tr><td><strong>Deve ser possível</strong>: retirar token a qualquer momento</td><td><code>removetoken</code> -&gt; <code>_on_cmd_remove_token</code></td></tr>
+<tr><td><strong>Deve ser possível</strong>: incluir token a qualquer momento</td><td><code>gentoken</code> -&gt; <code>_on_cmd_add_token</code> -&gt; <code>_generate_token</code></td></tr>
 <tr><td><strong>Deve ser possível</strong>: visualizar onde estão token e dados</td><td><code>status</code> (<code>com_token</code>, <code>aguardando_retorno</code>), <code>queue</code>; logs <code>[ap] ...</code></td></tr>
 <tr><td><strong>Deve ser possível</strong>: avisar retransmissões</td><td>log <code>RETRANSMISSAO</code> em <code>_on_rx_data</code></td></tr>
 <tr><td><strong>Deve ser possível</strong>: saber o que cada máquina faz</td><td><code>log()</code> por ação, prefixo <code>[apelido]</code></td></tr>
 <tr><td><strong>Deve ser possível</strong>: detectar token perdido</td><td><code>TokenMonitor</code> + <code>_on_mon_token_timeout</code></td></tr>
-<tr><td><strong>Deve ser possível</strong>: detectar token duplicado</td><td><code>_on_rx_token</code> (intervalo < <code>min_token_interval</code>)</td></tr>
+<tr><td><strong>Deve ser possível</strong>: detectar token duplicado</td><td><code>_on_rx_token</code> (intervalo &lt; <code>min_token_interval</code>)</td></tr>
 <tr><td><strong>Deve ser possível</strong>: detecção de falhas e recuperação</td><td>CRC no destino (NAK) + retransmissão única em <code>_on_rx_data</code></td></tr>
 <tr><td><strong>Deve ser possível</strong>: inclusão de máquinas a qualquer momento</td><td><code>_on_rx_discover</code>/<code>_on_rx_hello</code> + <code>_recompute_role</code>; <code>join</code></td></tr>
-<tr><td>Demonstração em >= 3 máquinas</td><td><code>tests/driver.py</code> + logs A/B/C (anel <code>[&#x27;A&#x27;,&#x27;B&#x27;,&#x27;C&#x27;]</code>)</td></tr>
+<tr><td>Demonstração em &gt;= 3 máquinas</td><td><code>tests/driver.py</code> + logs A/B/C (anel <code>[&#x27;A&#x27;,&#x27;B&#x27;,&#x27;C&#x27;]</code>)</td></tr>
 <tr><td>Interoperabilidade (formato fiel)</td><td><code>ring/protocol/packets.py</code> (ASCII + <code>:</code>); CRC zlib</td></tr>
 </tbody></table>
 <hr>
 <h2>20. Premissas e limitações de interoperabilidade</h2>
 <ul>
-<li><strong>CRC</strong>: convenção adotada = escopo <strong>somente a mensagem</strong> e representação <strong>decimal</strong> (string). Precisa ser confirmada com os outros grupos (o enunciado não fixa o escopo nem a base; o exemplo <code>19385749</code> é ilustrativo e não bate com o CRC-32 real de "Oi pessoal!", que é <code>1751094473</code>).</li>
+<li><strong>CRC</strong>: convenção adotada = escopo <strong>somente a mensagem</strong> e representação <strong>decimal</strong> (string). Precisa ser confirmada com os outros grupos (o enunciado não fixa o escopo nem a base; o exemplo <code>19385749</code> é ilustrativo e não bate com o CRC-32 real de &quot;Oi pessoal!&quot;, que é <code>1751094473</code>).</li>
 <li><strong>IPv4</strong> apenas (<code>socket.AF_INET</code>); <code>detect_ip</code> usa o truque do <code>connect</code> a <code>8.8.8.8</code> para achar o IP de saída.</li>
 <li><strong>Apelidos únicos</strong>: o anel é indexado por apelido; colisão é tratada como troca de endereço (<code>Ring.update -&gt; &quot;changed&quot;</code>), não como dois nós distintos. Em particular, uma colisão de apelido entre grupos <strong>sobrescreve</strong> a entrada no mapa de endereços — o enunciado pressupõe apelidos únicos (<code>A</code>, <code>B</code>, <code>C</code>, ...).</li>
+<li><strong>Saída e crash</strong>: a <strong>saída educada</strong> (<code>quit</code>) é tratada — o nó difunde LEAVE e os demais curam o anel (<code>Ring.remove</code> + <code>_recompute_role</code>). Já um <strong>crash abrupto</strong> (sem LEAVE) <strong>não</strong> é curado automaticamente: a expulsão unilateral por timeout foi evitada de propósito porque, num anel compartilhado com outros grupos, divergiria a topologia entre os nós; a recuperação de crash é <strong>manual</strong> (re-subir / <code>join</code>). O LEAVE (<code>30:apelido:ip</code>) é <strong>extensão local</strong> e não trafega para outros grupos como pacote conhecido (eles o ignoram).</li>
+<li><strong>Portão de entrada não imposto</strong>: o &quot;nova máquina só entra quando somente o token estiver circulando&quot; é <strong>disciplina do operador</strong>, não verificado pelo código, pela mesma razão de anel compartilhado — a topologia é reavaliada incrementalmente a cada DISCOVER/HELLO.</li>
+<li><strong>Detecção de duplicata é heurística</strong>: baseia-se em tempo (<code>intervalo &lt; tempo_minimo_entre_tokens</code>), logo depende do dimensionamento correto desse parâmetro pela volta do anel (ver Seção 15).</li>
 <li><strong>Timers de controle são locais e devem ser dimensionados pela volta do anel</strong> (ver Seção 15): <code>timeout_do_token</code> <strong>maior</strong> que a volta (~<code>numero_de_maquinas x tempo_token_e_dados</code>) para não declarar perdido um token saudável parado a jusante; <code>tempo_minimo_entre_tokens</code> <strong>abaixo</strong> da volta porém <strong>acima de ~metade dela</strong> para flagrar duplicata sem alarme falso no token único. Não viajam no fio, então cada grupo ajusta os seus.</li>
 <li><strong>Janela de descoberta</strong>: o token inicial só é avaliado após <code>--discovery</code> segundos; subir as máquinas com defasagem grande demais pode adiar a formação completa antes da eleição.</li>
-<li><strong>Segundo NAK</strong>: o enunciado diz "retransmite apenas uma vez". A implementação interpreta isso como: após a retransmissão única, um novo NAK faz a mensagem ser <strong>descartada</strong> (<code>retransmit_used</code> já <code>True</code>), liberando o token. Comportamento documentado no log ("NAK novamente apos retransmissao unica -> descartando msg").</li>
+<li><strong>Segundo NAK</strong>: o enunciado diz &quot;retransmite apenas uma vez&quot;. A implementação interpreta isso como: após a retransmissão única, um novo NAK faz a mensagem ser <strong>descartada</strong> (<code>retransmit_used</code> já <code>True</code>), liberando o token. Comportamento documentado no log (&quot;NAK novamente apos retransmissao unica -&gt; descartando msg&quot;).</li>
 <li><strong>Broadcast e modo local</strong>: no modo local o broadcast é simulado por cópia para cada peer do arquivo; no modo LAN usa <code>255.255.255.255:6000</code> com <code>SO_BROADCAST</code>.</li>
 <li><strong>WinError 10054</strong> (ICMP port-unreachable no Windows ao enviar para porta fechada) é ignorado no laço receptor, evitando derrubar a thread rx quando um peer ainda não subiu.</li>
 </ul>
@@ -496,7 +517,7 @@ C 127.0.0.1 6003</code></pre>
 <p>A implementação confere com a descrição pedida. Ajustes de precisão observados ao ler o código:</p>
 <ol>
 <li><strong>Ordenação do anel</strong>: <code>Ring.order</code> ordena por <code>(apelido, ip)</code>, não só por apelido. O apelido é a chave primária (ordem alfabética, como pede o enunciado); o ip é apenas desempate determinístico para apelidos coincidentes.</li>
-<li><strong>Geração do token inicial</strong>: o enunciado diz "a primeira máquina (A) gera o token". O código generaliza para o <strong>menor apelido</strong> (controladora), e a geração é decidida em <code>EVAL_FIRST_TOKEN</code>, protegida por <code>observed_activity</code> (só gera se nenhum token/dado foi visto na janela de descoberta).</li>
+<li><strong>Geração do token inicial</strong>: o enunciado diz &quot;a primeira máquina (A) gera o token&quot;. O código generaliza para o <strong>menor apelido</strong> (controladora), e a geração é decidida em <code>EVAL_FIRST_TOKEN</code>, protegida por <code>observed_activity</code> (só gera se nenhum token/dado foi visto na janela de descoberta).</li>
 <li><strong>Regeneração por timeout</strong>: além de <code>not waiting_for_data_return</code>, exige <code>len(members) &gt; 1</code> (não regenera token num anel de um só nó).</li>
 <li><strong>Token duplicado nos logs</strong>: a detecção vive em <code>_on_rx_token</code> e está capturada em execução dedicada com <code>min_token_interval=2,0</code> (<code>tests/log_dup_*.txt</code>), onde B injeta um segundo token com <code>gentoken</code> e A o consome sem matar o anel. O caminho consome o token excedente <strong>sem</strong> incrementar <code>epoch</code> (ver Seção 12), justamente para não cancelar o <code>TIMER_FORWARD_TOKEN</code> do token genuíno.</li>
 </ol>

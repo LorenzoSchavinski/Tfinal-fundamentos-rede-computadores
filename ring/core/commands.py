@@ -40,15 +40,18 @@ class CommandsMixin:
     def _on_cmd_status(self) -> None:
         ordem = [ap for ap, _ip, _port in self.ring.order()]
         suc_ap, _ = self._successor()
+        sozinho = "  (sozinho: segurando o token)" if (self.has_token and self._is_alone()) else ""
         log(
             "[{ap}] STATUS\n"
             "  endereco: {ip}:{port}  modo: {modo}\n"
-            "  controladora: {ctrl}  com_token: {tok}  aguardando_retorno: {wait}\n"
+            "  controladora: {ctrl}  com_token: {tok}{sozinho}  aguardando_retorno: {wait}\n"
             "  anel: {anel}\n"
-            "  sucessor: {suc}  fila: {flen}  primeiro_token_gerado: {ftg}".format(
+            "  sucessor: {suc}  fila: {flen}  primeiro_token_gerado: {ftg}\n"
+            "  tokens_perdidos: {perd}  tokens_duplicados: {dup}".format(
                 ap=self.apelido, ip=self.advertise_ip, port=self.port, modo=self.mode,
-                ctrl=self.is_controller, tok=self.has_token, wait=self.waiting_for_data_return,
+                ctrl=self.is_controller, tok=self.has_token, sozinho=sozinho, wait=self.waiting_for_data_return,
                 anel=ordem, suc=suc_ap, flen=len(self.queue), ftg=self.first_token_generated,
+                perd=self.tokens_perdidos, dup=self.tokens_duplicados,
             )
         )
 

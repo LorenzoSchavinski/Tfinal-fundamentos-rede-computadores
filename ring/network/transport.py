@@ -95,10 +95,6 @@ class Transport:
         """Envia ``data`` para um endereco unico (ip, porta)."""
         self.sock.sendto(data, (ip, port))
 
-    def local_addr(self):
-        """Endereco (ip, porta) efetivamente vinculado ao socket."""
-        return self.sock.getsockname()
-
     def close(self) -> None:
         """Sinaliza parada e fecha o socket (desbloqueia o recvfrom)."""
         self._stop = True

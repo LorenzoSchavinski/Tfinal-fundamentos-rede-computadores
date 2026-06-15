@@ -1,6 +1,6 @@
 === Anel de Tokens (UDP) ===
 apelido: B | modo: local | endereco anunciado: 127.0.0.1:6002
-Config: apelido=B | token_time=1.0s | error_prob=0.0% | token_timeout=10.0s | min_token_interval=2.0s
+Config: apelido=B | token_time=1.0s | error_prob=0.0% | token_timeout=8.0s | min_token_interval=2.0s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
 [B] HELLO de A (entrou no anel)
 No 'B' pronto. Digite 'help' para os comandos.
@@ -18,13 +18,4 @@ Comandos:
 [B] enviando token para C
 [B] recebeu o token
 [B] enviando token para C
-[B] gerou/inseriu um token na rede
-[B] recebeu o token
-[B] enviando token para C
-[B] STATUS
-  endereco: 127.0.0.1:6002  modo: local
-  controladora: False  com_token: False  aguardando_retorno: False
-  anel: ['A', 'B', 'C']
-  sucessor: C  fila: 0  primeiro_token_gerado: True
-  tokens_perdidos: 0  tokens_duplicados: 0
 [B] enviando LEAVE (saida da rede)

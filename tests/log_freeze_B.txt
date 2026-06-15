@@ -18,13 +18,42 @@ Comandos:
 [B] enviando token para C
 [B] recebeu o token
 [B] enviando token para C
-[B] gerou/inseriu um token na rede
+[B] CRC NAO confere de A (recebido=891568578 calculado=582745401) -> NAK
+[B] DADOS de A: "aZc" -> NAK
+[B] recebeu o token
+[B] enviando token para C
+[B] DADOS de A: "abc" -> ACK
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] CRC NAO confere de A (recebido=2615402659 calculado=306321264) -> NAK
+[B] DADOS de A: "r234" -> NAK
+[B] recebeu o token
+[B] enviando token para C
+[B] DADOS de A: "1234" -> ACK
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] repassando DADOS de A para C
+[B] recebeu o token
+[B] enviando token para C
+[B] repassando DADOS de A para C
+[B] recebeu o token
+[B] enviando token para C
 [B] recebeu o token
 [B] enviando token para C
 [B] STATUS
   endereco: 127.0.0.1:6002  modo: local
   controladora: False  com_token: False  aguardando_retorno: False
   anel: ['A', 'B', 'C']
-  sucessor: C  fila: 0  primeiro_token_gerado: True
+  sucessor: C  fila: 0  primeiro_token_gerado: False
   tokens_perdidos: 0  tokens_duplicados: 0
+[B] recebeu o token
+[B] enviando token para C
 [B] enviando LEAVE (saida da rede)

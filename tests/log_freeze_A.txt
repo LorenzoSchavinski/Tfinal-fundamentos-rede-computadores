@@ -1,6 +1,6 @@
 === Anel de Tokens (UDP) ===
 apelido: A | modo: local | endereco anunciado: 127.0.0.1:6001
-Config: apelido=A | token_time=1.0s | error_prob=100.0% | token_timeout=10.0s | min_token_interval=0.5s
+Config: apelido=A | token_time=1.0s | error_prob=100.0% | token_timeout=10.0s | min_token_interval=2.0s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
 No 'A' pronto. Digite 'help' para os comandos.
 Comandos:
@@ -19,42 +19,48 @@ Comandos:
 [A] recebeu o token
 [A] enviando token para B
 [A] recebeu o token
-[A] enviando token para B
-[A] DADOS de B: "Ola A" -> ACK
-[A] recebeu o token
-[A] enviando token para B
-[A] recebeu o token
-[A] msg para C enfileirada (1/10)
-[A] enviando DADOS para C (corrompido=True): "Teste erro"
-[A] RETRANSMISSAO: NAK recebido de C, reenviando msg correta na proxima passagem do token
+[A] msg para B enfileirada (1/10)
+[A] enviando DADOS para B (corrompido=True): "abc"
+[A] RETRANSMISSAO: NAK recebido de B, reenviando msg correta na proxima passagem do token
 [A] enviando token para B
 [A] recebeu o token
-[A] enviando DADOS para C (corrompido=False): "Teste erro"
+[A] enviando DADOS para B (corrompido=False): "abc"
 [A] mensagem entregue com sucesso (ACK)
 [A] enviando token para B
 [A] recebeu o token
 [A] enviando token para B
 [A] recebeu o token
 [A] enviando token para B
+[A] msg para B enfileirada (1/10)
 [A] recebeu o token
-[A] enviando token para B
-[A] BROADCAST de C: "Ola galera"
-[A] recebeu o token
-[A] enviando token para B
-[A] recebeu o token
+[A] enviando DADOS para B (corrompido=True): "1234"
+[A] RETRANSMISSAO: NAK recebido de B, reenviando msg correta na proxima passagem do token
 [A] enviando token para B
 [A] recebeu o token
+[A] enviando DADOS para B (corrompido=False): "1234"
+[A] mensagem entregue com sucesso (ACK)
 [A] enviando token para B
-[A] nao estou com o token no momento (nada a retirar)
-[A] TOKEN PERDIDO detectado (timeout) -> gerando novo token
-[A] gerou/inseriu um token na rede
 [A] recebeu o token
 [A] enviando token para B
+[A] recebeu o token
+[A] enviando token para B
+[A] msg para C enfileirada (1/10)
+[A] recebeu o token
+[A] enviando DADOS para C (corrompido=True): "hello"
+[A] RETRANSMISSAO: NAK recebido de C, reenviando msg correta na proxima passagem do token
+[A] enviando token para B
+[A] recebeu o token
+[A] enviando DADOS para C (corrompido=False): "hello"
+[A] mensagem entregue com sucesso (ACK)
+[A] enviando token para B
+[A] recebeu o token
+[A] enviando token para B
+[A] recebeu o token
 [A] STATUS
   endereco: 127.0.0.1:6001  modo: local
-  controladora: True  com_token: False  aguardando_retorno: False
+  controladora: True  com_token: True  aguardando_retorno: False
   anel: ['A', 'B', 'C']
   sucessor: B  fila: 0  primeiro_token_gerado: True
-  tokens_perdidos: 1  tokens_duplicados: 0
-[A] recebeu o token
+  tokens_perdidos: 0  tokens_duplicados: 0
+[A] enviando token para B
 [A] enviando LEAVE (saida da rede)

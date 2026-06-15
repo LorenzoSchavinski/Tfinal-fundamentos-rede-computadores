@@ -25,19 +25,33 @@ Comandos:
 [B] enviando token para C
 [B] recebeu o token
 [B] enviando token para C
+[B] repassando DADOS de A para C
+[B] recebeu o token
+[B] enviando token para C
+[B] repassando DADOS de A para C
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] BROADCAST de C: "Ola galera"
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
 [B] recebeu o token
 [B] token retirado da rede
 [B] recebeu o token
 [B] enviando token para C
-[B] BROADCAST de C: "Ola galera"
-[B] repassando DADOS de A para C
 [B] recebeu o token
-[B] enviando token para C
 [B] STATUS
   endereco: 127.0.0.1:6002  modo: local
-  controladora: False  com_token: False  aguardando_retorno: False
+  controladora: False  com_token: True  aguardando_retorno: False
   anel: ['A', 'B', 'C']
   sucessor: C  fila: 0  primeiro_token_gerado: False
-[B] repassando DADOS de A para C
-[B] recebeu o token
+  tokens_perdidos: 0  tokens_duplicados: 0
 [B] enviando token para C
+[B] enviando LEAVE (saida da rede)

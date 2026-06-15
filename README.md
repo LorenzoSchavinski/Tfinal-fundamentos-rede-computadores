@@ -102,6 +102,16 @@ Os dois timers do controle de token (`timeout_token` na linha 4 e `tempo_minimo_
 [A] TOKEN DUPLICADO detectado (intervalo < minimo) -> removido da rede
 ```
 
+**Saida educada (cura do anel).** Uma maquina que encerra com `quit` difunde um aviso de saida; os nossos nos a removem e recompoem o anel sozinhos (ex.: `A->B->C->A` vira `A->C->A`), sem reinicializar:
+
+```
+[A] B saiu da rede -> recalculando anel
+```
+
+Se sobrar so uma maquina no anel, ela segura o token quieto (sem enviar a si mesma) e retoma a circulacao quando outra entrar.
+
+O `status` tambem mostra os contadores `tokens_perdidos` e `tokens_duplicados`, respondendo se houve token perdido ou mais de um token na rede. Uma maquina que vira controladora ao entrar atrasada (menor apelido entrando depois que o anel ja roda) tambem passa a vigiar token perdido, pois o monitor liga via `observed_activity`; portanto e possivel adicionar a maquina de menor apelido por ultimo sem perder a deteccao de token perdido.
+
 ## Contrato de interoperabilidade
 
 Para a apresentacao com outros grupos, todas as maquinas devem falar o mesmo formato no fio.
@@ -121,6 +131,7 @@ Formatos exatos:
 - **Controle (campo `<controle>` de DADOS):** um de `maquinainexistente`, `ACK` ou `NAK`. O valor inicial e `maquinainexistente` (origem ainda nao sabe se o destino existe); o destino devolve `ACK` (recebido sem erro de CRC) ou `NAK` (erro de CRC, pede retransmissao).
 - **Destino especial:** `BROADCAST` entrega a mensagem a todos os nos do anel.
 - **Mensagem:** vai em bytes crus no fim do datagrama, sem escape, podendo conter `:` a vontade (o parser limita as divisoes para nunca quebrar a mensagem).
+- **LEAVE (`30:apelido:ip`) e extensao local**, fora da especificacao: avisa a saida educada de um no para os nossos proprios pares. Outros grupos nao o enviam e o ignoram como pacote desconhecido, entao ele **nao quebra a interoperabilidade**.
 
 ### CRC
 

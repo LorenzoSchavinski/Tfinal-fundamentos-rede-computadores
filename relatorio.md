@@ -106,9 +106,9 @@ Fila thread-safe de eventos `(tipo, payload)`. É o ponto de serialização de t
 - `waiting_for_data_return` — enviou DADOS e aguarda o retorno à origem (segura o token);
 - `epoch` (contador) — invalida `Timer`s obsoletos quando o token muda (regerado/retirado/topologia);
 - `expect_token_return` — primeira volta após (re)gerar o token, para isentar a detecção de duplicata;
-- `inflight` — `QueueItem` que está circulando agora;
 - `observed_activity` — já viu token ou dados (impede gerar token inicial à toa);
 - `first_token_generated` — já houve geração do token inicial;
+- `tokens_perdidos`, `tokens_duplicados` — contadores de tokens perdidos/duplicados detectados (expostos no `status`);
 - `is_controller`, `last_token_rx` (instante monotônico do último token aceito como controladora).
 
 ---
@@ -154,6 +154,10 @@ A sincronização **não** usa locks sobre o estado. Ela se apoia em três peça
 
 3. **Lock de impressão** (`ring/ui/console._print_lock`). Como rx, monitor e motor podem imprimir simultaneamente, `log()` envolve o `print` num `threading.Lock`, garantindo linhas atômicas (sem entrelaçamento). É a única exclusão mútua explícita do sistema, e protege apenas a saída, não o estado.
 
+### Robustez do motor
+
+O laço do motor (`_engine_loop`) envolve cada despacho de handler em `try/except Exception`, registrando o `traceback` e seguindo para o próximo evento. Assim, um pacote malformado ou estranho (por exemplo, de outro grupo durante a interoperação) **não derruba a thread do motor nem congela o nó**. Complementando, o caminho de retorno à origem em `_on_rx_data` **sempre libera/encaminha o token**, inclusive quando o `controle` que volta é inesperado (ou um NAK chega com a fila vazia): o token nunca fica preso por um valor de controle desconhecido, o que importa para interoperar com implementações de outros grupos.
+
 ---
 
 ## 7. Protocolo e formato dos pacotes (interoperabilidade)
@@ -164,10 +168,13 @@ Todo o tráfego é montado/desmontado em `ring/protocol/packets.py`. O cabeçalh
 |---|---|---|---|
 | DISCOVER | `10` | `10:<apelido>:<ip>` | apelido e IP da origem |
 | HELLO | `20` | `20:<apelido>:<ip>` | apelido e IP da origem |
+| LEAVE | `30` | `30:<apelido>:<ip>` | apelido e IP de quem sai (extensão local) |
 | TOKEN | `1000` | `1000` | nenhum (payload é só `1000`) |
 | DADOS | `2000` | `2000:<origem>:<destino>:<controle>:<crc>:<mensagem>` | origem, destino, controle, CRC, mensagem |
 
 Valores do campo `controle`: `maquinainexistente` (CTRL_NONE, estado inicial), `ACK`, `NAK`.
+
+> **Honestidade sobre o LEAVE**: o pacote `30:<apelido>:<ip>` é uma **extensão local** desta implementação para a saída educada (`quit`). Ele **não faz parte do protocolo de fio do enunciado**: outros grupos não o enviam e, ao recebê-lo, o tratam como datagrama desconhecido (`UNKNOWN`) e o **ignoram com segurança**. Apenas os nossos próprios nós o honram (`_on_rx_leave`). Portanto o LEAVE **não afeta a interoperabilidade**.
 
 Exemplo real de DADOS (formato do enunciado): `2000:B:A:maquinainexistente:19385749:Oi pessoal!`.
 
@@ -235,11 +242,11 @@ Cada máquina tem uma `MessageQueue` (FIFO, até **10** itens). Cada item carreg
 ### Ciclo do token (`TokenLogicMixin._on_rx_token`)
 Ao receber o token, `has_token = True`. Então:
 
-- **Fila vazia**: segura o token por `token_time` e agenda `TIMER_FORWARD_TOKEN` (com a época atual); ao disparar, `_forward_token` envia o token ao sucessor.
+- **Fila vazia**: segura o token por `token_time` e agenda `TIMER_FORWARD_TOKEN` (com a época atual); ao disparar, `_on_timer_forward_token` reavalia a fila: se uma mensagem foi enfileirada **durante** a janela de retenção (intervalo de ritmo), os dados são transmitidos no próprio tique (`_send_data_packet(peek())`); caso contrário, `_forward_token` envia o token ao sucessor. Assim nenhuma mensagem é perdida e o token nunca fica preso por ter sido enfileirado um envio enquanto o nó o segurava.
 - **Fila não vazia**: chama `_send_data_packet(head)` e **segura o token** até os dados voltarem (não encaminha agora).
 
 ### Emissão de DADOS (`_send_data_packet`)
-Calcula o CRC da mensagem original, aplica `maybe_corrupt` (respeitando `skip`), monta o DATA com controle `maquinainexistente`, marca `inflight`/`waiting_for_data_return`, **pausa o monitor** se for controladora, e envia ao sucessor.
+Calcula o CRC da mensagem original, aplica `maybe_corrupt` (respeitando `skip`), monta o DATA com controle `maquinainexistente`, marca `waiting_for_data_return`, **pausa o monitor** se for controladora, e envia ao sucessor.
 
 ### Tratamento na origem (`_on_rx_data`, ramo `o == self.apelido`)
 O datagrama deu a volta. Conforme o controle:
@@ -270,14 +277,20 @@ Trecho real (origem segura token, envia, recebe ACK, libera — `tests/log_B.txt
 ## 12. Controle do token
 
 ### Token perdido (timeout)
-O `TokenMonitor` roda **só na controladora** (`set_enabled` ligado quando `is_controller` e já houve token). O relógio de liveness é **resetado por qualquer atividade observada no anel**: a própria thread receptora chama `monitor.note_activity()` para **todo datagrama de token ou dados** que vê (em `on_datagram`, antes mesmo de o motor processar), e o motor também o faz a cada RX/envio/encaminhamento. Assim, um token saudável que está **parado/circulando em nós a jusante** mantém o relógio vivo e **não** é declarado perdido.
+O `TokenMonitor` roda **só na controladora**. O `set_enabled` é ligado quando o nó **é controladora E** (`first_token_generated` **OU** `observed_activity`) — ver `_recompute_role`. A condição `observed_activity` cobre um caso real: uma máquina que **se torna controladora ao entrar tarde** (apelido menor que os já presentes) tem `first_token_generated == False`, mas, como já viu token/dados circulando, **também passa a vigiar** o token perdido. Trecho real (`tests/log_latejoin_A.txt`), em que A entra depois, vira controladora e detecta o token sumido:
+
+```
+[A] TOKEN PERDIDO detectado (timeout) -> gerando novo token
+```
+
+O relógio de liveness é **resetado por qualquer atividade observada no anel**: a própria thread receptora chama `monitor.note_activity()` para **todo datagrama de token ou dados** que vê (em `on_datagram`, antes mesmo de o motor processar), e o motor também o faz a cada RX/envio/encaminhamento. Assim, um token saudável que está **parado/circulando em nós a jusante** mantém o relógio vivo e **não** é declarado perdido.
 
 Além disso, o monitor é **pausado** sempre que o token está comprovadamente na controladora. O helper `_refresh_monitor_pause()` aplica `set_paused(self.has_token or self.waiting_for_data_return)` e é chamado logo após qualquer mudança de `has_token` ou `waiting_for_data_return`. Ou seja, a vigilância fica suspensa tanto enquanto a controladora **detém o token** (`has_token`) quanto durante o **round-trip dos seus próprios dados** (`waiting_for_data_return`), e só retoma quando o token de fato saiu daqui. Se o silêncio passar de `token_timeout`, o monitor posta `MON_TOKEN_TIMEOUT`; `_on_mon_token_timeout` regenera o token **somente se** há mais de um membro (`len(members) > 1`) e não há transmissão de dados em curso (`not waiting_for_data_return`).
 
 Em conjunto, essas duas peças (relógio resetado por atividade + pausa enquanto o token está aqui) fazem a controladora regenerar um token **apenas quando ele está genuinamente perdido**, eliminando o falso "token perdido" durante a circulação normal ou com o token estacionado em outro nó.
 
 ### Token duplicado
-Detectado **no nó**, em `_on_rx_token` (controladora). Se o intervalo entre dois tokens consecutivos for menor que `min_token_interval`, conclui-se que há mais de um token circulando: o nó **consome o token excedente** (retorna sem encaminhar) e **atualiza `last_token_rx`** com o instante atual, para medir corretamente o intervalo até o próximo token genuíno. Esse caminho **não incrementa `epoch`**: o token real já está aqui e possui um `TIMER_FORWARD_TOKEN` pendente com a época atual; bumpar `epoch` cancelaria esse timer e mataria o anel. Consumir silenciosamente o excedente é suficiente e preserva a circulação. A **primeira volta** logo após uma (re)geração do token é isentada por `expect_token_return` (o primeiro retorno não conta como duplicata).
+Detectado **no nó**, em `_on_rx_token` (controladora). A detecção é **temporal (heurística)**: se o intervalo entre dois tokens consecutivos for menor que `min_token_interval`, conclui-se que há mais de um token circulando. O nó **consome o token excedente** (retorna sem encaminhar) e **atualiza `last_token_rx`** com o instante atual, para medir corretamente o intervalo até o próximo token genuíno. Esse caminho **não incrementa `epoch`**: o token real já está aqui e possui um `TIMER_FORWARD_TOKEN` pendente com a época atual; bumpar `epoch` cancelaria esse timer e mataria o anel. Consumir silenciosamente o excedente é suficiente e preserva a circulação. A **primeira volta** logo após uma (re)geração do token é isentada por `expect_token_return` (o primeiro retorno não conta como duplicata); além disso, `_generate_token` **reseta `last_token_rx`** no instante da geração, criando uma baseline fresca para que um timestamp antigo não julgue mal a chegada do próximo token. Como o método é heurístico, recomenda-se configurar `tempo_minimo_entre_tokens` entre **~metade** e **a volta inteira** do anel: assim um único token (que retorna a cada ~volta) nunca é flagrado, enquanto dois tokens co-circulando (que chegam ~meia-volta apart) são.
 
 ### Geração e retirada manuais
 `gentoken`/`addtoken` -> `_on_cmd_add_token` -> `_generate_token` (incrementa época, marca `first_token_generated`, envia token ao sucessor) — funciona em **qualquer máquina**. `removetoken`/`rmtoken` -> `_on_cmd_remove_token`: **só remove quando o nó realmente detém o token** — nesse caso larga-o (`has_token = False`), incrementa `epoch` e atualiza a pausa do monitor; se o nó **não** está com o token, nada é feito (loga "nada a retirar") e `epoch` **não** é tocado, pois bumpar a época sem ter o token invalidaria timers de encaminhamento legítimos pendentes em outros nós.
@@ -315,7 +328,17 @@ Trecho real (broadcast em todas as máquinas — `tests/log_A.txt`, `tests/log_B
 
 ## 14. Alteração topológica do anel
 
-Máquinas podem **entrar em execução**: ao subir (ou via comando `join`/`discover`), enviam DISCOVER; as demais respondem HELLO. `_update_member` chama `Ring.update` e `_recompute_role`, recomputando **sucessor** e **controladora** a partir do novo conjunto, **sem reinicialização**. Se um apelido reaparece com endereço diferente, `Ring.update` retorna `"changed"` e o nó avisa ("mudou de endereço"). O enunciado prevê entrada "quando somente o token estiver circulando"; a topologia é reavaliada de forma incremental a cada DISCOVER/HELLO.
+Máquinas podem **entrar em execução**: ao subir (ou via comando `join`/`discover`), enviam DISCOVER; as demais respondem HELLO. `_update_member` chama `Ring.update` e `_recompute_role`, recomputando **sucessor** e **controladora** a partir do novo conjunto, **sem reinicialização**. Se um apelido reaparece com endereço diferente, `Ring.update` retorna `"changed"` e o nó avisa ("mudou de endereço").
+
+Além da entrada, uma máquina que **sai limpa** (comando `quit`) agora difunde um **LEAVE** em broadcast (em `_shutdown`, com o socket ainda aberto). Quem recebe (`_on_rx_leave`) chama `Ring.remove`, recomputa sucessor/controladora (`_recompute_role`) e o anel **se cura sozinho** entre os nossos nós — por exemplo, `A->B->C->A` passa a `A->C->A`. Trecho real (`tests/log_leave_A.txt`), quando B sai e A reconstrói o anel:
+
+```
+[A] B saiu da rede -> recalculando anel
+```
+
+Limitação declarada com franqueza: um **CRASH abrupto** (queda sem enviar LEAVE) **não** é curado automaticamente. A expulsão unilateral por timeout foi **deliberadamente evitada**: num anel compartilhado com outros grupos, cada nó perceberia silêncios diferentes e removeria membros distintos, **divergindo a topologia** entre as máquinas; a recuperação de um crash é, portanto, **re-sincronização manual** (subir o nó de novo / `join`). Pela mesma razão de anel compartilhado, o "portão" de entrada do enunciado ("nova máquina só entra quando somente o token estiver circulando") é tratado como **disciplina do operador**, não imposto pelo código: a topologia é reavaliada de forma incremental a cada DISCOVER/HELLO.
+
+**Caso degenerado (uma única máquina).** Se as demais máquinas saem e resta **apenas uma** no anel, ela **não** envia o token para si mesma: segura o token **em silêncio** (loga uma vez "sou a unica maquina no anel; segurando o token ate outra entrar") e volta a circulá-lo assim que outra máquina entra (DISCOVER/HELLO), logando "nova maquina entrou; retomando a circulacao do token". O enunciado exige no mínimo 3 máquinas, então é um caso degenerado fora do cenário pedido, tratado de forma limpa apenas para evitar um loop inútil do token contra o próprio endereço.
 
 ---
 
@@ -363,13 +386,13 @@ O `Console` (thread principal) traduz comandos em eventos:
 | `send <destino> <msg...>` | `CMD_SEND` | Enfileira mensagem (destino = apelido ou `BROADCAST`). |
 | `gentoken` / `addtoken` | `CMD_ADD_TOKEN` | Gera/insere um token na rede. |
 | `removetoken` / `rmtoken` | `CMD_REMOVE_TOKEN` | Retira o token da rede. |
-| `status` | `CMD_STATUS` | Mostra endereço, papel, posse do token, anel, sucessor, fila, etc. |
+| `status` | `CMD_STATUS` | Mostra endereço, papel, posse do token, anel, sucessor, fila, contadores `tokens_perdidos`/`tokens_duplicados`, etc. |
 | `queue` / `fila` | `CMD_QUEUE` | Lista a fila (destino, mensagem, flags `no_error`/`retransmit_used`). |
 | `join` / `discover` | `CMD_JOIN` | Reenvia DISCOVER (atualiza topologia). |
 | `help` / `?` | — | Ajuda. |
 | `quit` / `exit` / `sair` | `CMD_QUIT` | Encerra. |
 
-Atendimento ao requisito "saber o que está acontecendo no anel": cada ação relevante é logada com o prefixo `[apelido]` — recepção/envio de token ("recebeu o token", "enviando token para X"), envio de dados (com flag `corrompido=...`), entrega (ACK), NAK/CRC, retransmissão, broadcast, detecção de perdido/duplicado. `status` mostra **onde está o token** (`com_token`) e se há dados em trânsito (`aguardando_retorno`), e `queue` mostra **onde estão os dados** pendentes.
+Atendimento ao requisito "saber o que está acontecendo no anel": cada ação relevante é logada com o prefixo `[apelido]` — recepção/envio de token ("recebeu o token", "enviando token para X"), envio de dados (com flag `corrompido=...`), entrega (ACK), NAK/CRC, retransmissão, broadcast, detecção de perdido/duplicado. `status` mostra **onde está o token** (`com_token`) e se há dados em trânsito (`aguardando_retorno`), e `queue` mostra **onde estão os dados** pendentes. O `status` também reporta os contadores `tokens_perdidos` e `tokens_duplicados`, respondendo diretamente ao item do enunciado "saber se houve token perdido ou se há mais de um token".
 
 Trecho real de `status` (`tests/log_A.txt`):
 
@@ -379,6 +402,7 @@ Trecho real de `status` (`tests/log_A.txt`):
   controladora: True  com_token: False  aguardando_retorno: False
   anel: ['A', 'B', 'C']
   sucessor: B  fila: 0  primeiro_token_gerado: True
+  tokens_perdidos: 0  tokens_duplicados: 0
 ```
 
 ---
@@ -524,6 +548,22 @@ E o anel **segue circulando** depois do evento — o próprio B continua receben
 [B] enviando token para C
 ```
 
+### 18.8 Saída educada e cura do anel (B sai, A->C)
+B encerra com `quit` e difunde LEAVE; A o remove e recompõe o anel `['A','B','C']` para `['A','C']`, passando a encaminhar o token direto para C (`tests/log_leave_A.txt`):
+
+```
+[A] B saiu da rede -> recalculando anel
+[A] enviando token para C
+```
+
+### 18.9 Controladora que entra tarde vigia o token perdido
+A entra depois de B e C já circularem o token; por ter o menor apelido, torna-se controladora (`first_token_generated` ainda `False`, mas `observed_activity` `True`). Quando o token some, A detecta o timeout e regenera (`tests/log_latejoin_A.txt`):
+
+```
+[A] TOKEN PERDIDO detectado (timeout) -> gerando novo token
+[A] gerou/inseriu um token na rede
+```
+
 ---
 
 ## 19. Mapeamento requisito -> implementação
@@ -565,6 +605,9 @@ E o anel **segue circulando** depois do evento — o próprio B continua receben
 - **CRC**: convenção adotada = escopo **somente a mensagem** e representação **decimal** (string). Precisa ser confirmada com os outros grupos (o enunciado não fixa o escopo nem a base; o exemplo `19385749` é ilustrativo e não bate com o CRC-32 real de "Oi pessoal!", que é `1751094473`).
 - **IPv4** apenas (`socket.AF_INET`); `detect_ip` usa o truque do `connect` a `8.8.8.8` para achar o IP de saída.
 - **Apelidos únicos**: o anel é indexado por apelido; colisão é tratada como troca de endereço (`Ring.update -> "changed"`), não como dois nós distintos. Em particular, uma colisão de apelido entre grupos **sobrescreve** a entrada no mapa de endereços — o enunciado pressupõe apelidos únicos (`A`, `B`, `C`, ...).
+- **Saída e crash**: a **saída educada** (`quit`) é tratada — o nó difunde LEAVE e os demais curam o anel (`Ring.remove` + `_recompute_role`). Já um **crash abrupto** (sem LEAVE) **não** é curado automaticamente: a expulsão unilateral por timeout foi evitada de propósito porque, num anel compartilhado com outros grupos, divergiria a topologia entre os nós; a recuperação de crash é **manual** (re-subir / `join`). O LEAVE (`30:apelido:ip`) é **extensão local** e não trafega para outros grupos como pacote conhecido (eles o ignoram).
+- **Portão de entrada não imposto**: o "nova máquina só entra quando somente o token estiver circulando" é **disciplina do operador**, não verificado pelo código, pela mesma razão de anel compartilhado — a topologia é reavaliada incrementalmente a cada DISCOVER/HELLO.
+- **Detecção de duplicata é heurística**: baseia-se em tempo (`intervalo < tempo_minimo_entre_tokens`), logo depende do dimensionamento correto desse parâmetro pela volta do anel (ver Seção 15).
 - **Timers de controle são locais e devem ser dimensionados pela volta do anel** (ver Seção 15): `timeout_do_token` **maior** que a volta (~`numero_de_maquinas x tempo_token_e_dados`) para não declarar perdido um token saudável parado a jusante; `tempo_minimo_entre_tokens` **abaixo** da volta porém **acima de ~metade dela** para flagrar duplicata sem alarme falso no token único. Não viajam no fio, então cada grupo ajusta os seus.
 - **Janela de descoberta**: o token inicial só é avaliado após `--discovery` segundos; subir as máquinas com defasagem grande demais pode adiar a formação completa antes da eleição.
 - **Segundo NAK**: o enunciado diz "retransmite apenas uma vez". A implementação interpreta isso como: após a retransmissão única, um novo NAK faz a mensagem ser **descartada** (`retransmit_used` já `True`), liberando o token. Comportamento documentado no log ("NAK novamente apos retransmissao unica -> descartando msg").
