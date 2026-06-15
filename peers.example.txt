@@ -1,0 +1,5 @@
+# Tabela de pares para teste local (varias instancias na mesma maquina).
+# Use no modo local com:  python main.py <config> --peers peers.example.txt --port <porta> --ip 127.0.0.1
+A 127.0.0.1 6001
+B 127.0.0.1 6002
+C 127.0.0.1 6003

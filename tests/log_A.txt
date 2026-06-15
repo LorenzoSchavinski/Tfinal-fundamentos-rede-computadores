@@ -1,0 +1,46 @@
+=== Anel de Tokens (UDP) ===
+apelido: A | modo: local | endereco anunciado: 127.0.0.1:6001
+Config: apelido=A | token_time=1.0s | error_prob=100.0% | token_timeout=10.0s | min_token_interval=0.5s
+peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
+No 'A' pronto. Digite 'help' para os comandos.
+Comandos:
+  send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
+  gentoken | addtoken           gera/insere um token na rede
+  removetoken | rmtoken         retira o token da rede
+  status                        mostra o estado atual do no
+  queue | fila                  lista a fila de mensagens
+  join | discover               reenvia DISCOVER (atualiza topologia)
+  help | ?                      mostra esta ajuda
+  quit | exit | sair            encerra
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] sou a primeira maquina (menor apelido) e nenhum token observado -> gerando token inicial
+[A] gerou/inseriu um token na rede
+[A] recebeu o token
+[A] enviando token para B
+[A] recebeu o token
+[A] enviando token para B
+[A] DADOS de B: "Ola A" -> ACK
+[A] recebeu o token
+[A] enviando token para B
+[A] recebeu o token
+[A] msg para C enfileirada (1/10)
+[A] token retirado da rede
+[A] TOKEN PERDIDO detectado (timeout) -> gerando novo token
+[A] gerou/inseriu um token na rede
+[A] TOKEN PERDIDO detectado (timeout) -> gerando novo token
+[A] gerou/inseriu um token na rede
+[A] BROADCAST de C: "Ola galera"
+[A] recebeu o token
+[A] enviando DADOS para C (corrompido=True): "Teste erro"
+[A] RETRANSMISSAO: NAK recebido de C, reenviando msg correta na proxima passagem do token
+[A] enviando token para B
+[A] STATUS
+  endereco: 127.0.0.1:6001  modo: local
+  controladora: True  com_token: False  aguardando_retorno: False
+  anel: ['A', 'B', 'C']
+  sucessor: B  fila: 1  primeiro_token_gerado: True
+[A] recebeu o token
+[A] enviando DADOS para C (corrompido=False): "Teste erro"
+[A] mensagem entregue com sucesso (ACK)
+[A] enviando token para B
