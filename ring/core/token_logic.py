@@ -77,6 +77,19 @@ class TokenLogicMixin:
             else:
                 self._send_data_packet(self.queue.peek())
 
+    def _on_timer_data_return_timeout(self, ep) -> None:
+        # O DATA enviado nesta epoca nao voltou a tempo. Se ainda aguardamos o
+        # retorno (e a epoca nao mudou), desistimos: descartamos a cabeca da fila,
+        # limpamos o estado de espera e liberamos o token. Caso contrario (retorno
+        # ja ocorreu ou token foi regenerado) este timer eh inerte.
+        if ep != self.epoch or not self.waiting_for_data_return:
+            return
+        log("[{}] timeout aguardando retorno dos dados, liberando token".format(self.apelido))
+        self._drop_head()
+        self.waiting_for_data_return = False
+        self._refresh_monitor_pause()
+        self._forward_token()
+
     def _send_data_packet(self, item) -> None:
         crc = crc_mod.crc_field(item.message_bytes)
         msg = item.message_bytes
@@ -88,6 +101,13 @@ class TokenLogicMixin:
         data = build_data(self.apelido, item.destino, CTRL_NONE, crc, msg_out)
         self.waiting_for_data_return = True
         self._refresh_monitor_pause()  # aguardando retorno dos dados: pausa monitor
+        # Rede de seguranca: se o DATA nunca voltar (par dropou, destino saiu), o no
+        # seguraria o token para sempre. Um timer guardado por epoca libera o token.
+        ep = self.epoch
+        threading.Timer(
+            self.config.token_timeout,
+            lambda: self.post("TIMER_DATA_RETURN_TIMEOUT", ep=ep),
+        ).start()
         log("[{}] enviando DADOS para {} (corrompido={}): \"{}\"".format(
             self.apelido, item.destino, corrupted, item.message_str))
         self._send_to_successor(data)
@@ -97,11 +117,15 @@ class TokenLogicMixin:
         if self._is_alone():
             # Defensivo: nunca enviar o token a nos mesmos; mantem has_token inalterado.
             return
+        # Libera o token ANTES de enviar: se o envio falhar, has_token ja esta False
+        # e o monitor volta a vigiar, permitindo regeneracao. Nunca ficamos travados
+        # segurando o token apos uma falha de envio (essencial na controladora).
         self.has_token = False
         self._refresh_monitor_pause()  # token saiu daqui: retoma vigilancia
         ap, _ = self._successor()
         log("[{}] enviando token para {}".format(self.apelido, ap))
-        self._send_to_successor(build_token())
+        if not self._send_to_successor(build_token()):
+            log("[{}] falha ao repassar token, recuperacao via monitor".format(self.apelido))
         self.monitor.note_activity()
 
     def _generate_token(self) -> None:

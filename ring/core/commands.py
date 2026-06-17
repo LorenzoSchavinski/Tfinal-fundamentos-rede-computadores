@@ -19,6 +19,7 @@ class CommandsMixin:
         if self.queue.is_full():
             log("[{}] fila cheia (max 10)".format(self.apelido))
             return
+        destino = destino.strip().upper()  # normaliza apelido alvo; mensagem fica intacta
         self.queue.enqueue(destino, message)
         log("[{}] msg para {} enfileirada ({}/10)".format(self.apelido, destino, len(self.queue)))
 

@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import socket
 import threading
+import traceback
+
+from ring.ui.console import log
 
 # WinError 10054: no Windows, enviar UDP para uma porta fechada faz o sistema
 # devolver um ICMP port-unreachable que se manifesta como WinError 10054 no
@@ -81,19 +84,36 @@ class Transport:
                     continue  # ICMP port-unreachable no Windows: ignorar
                 break
             if data:
-                self.on_datagram(data, addr)
+                # Um pacote malformado nunca deve derrubar o receptor: isola o handler.
+                try:
+                    self.on_datagram(data, addr)
+                except Exception:
+                    log("[transport] erro ao tratar datagrama de {}: {}".format(addr, traceback.format_exc()))
 
-    def broadcast(self, data: bytes) -> None:
+    def _sendto(self, data: bytes, addr) -> bool:
+        """Envia ``data`` a ``addr`` tolerando falha: loga e retorna False em erro."""
+        try:
+            self.sock.sendto(data, addr)
+            return True
+        except OSError as exc:
+            log("[transport] falha ao enviar para {}: {}".format(addr, exc))
+            return False
+
+    def broadcast(self, data: bytes) -> bool:
         """Difunde ``data`` a todos: difusao real (lan) ou copia por alvo (local)."""
         if self.mode == "lan":
-            self.sock.sendto(data, ("255.255.255.255", self.bind_port))
-        else:
-            for t in self.broadcast_targets:
-                self.sock.sendto(data, t)
+            return self._sendto(data, ("255.255.255.255", self.bind_port))
+        ok = True
+        for t in self.broadcast_targets:
+            ok = self._sendto(data, t) and ok
+        return ok
 
-    def send_addr(self, ip, port, data: bytes) -> None:
+    def send_addr(self, ip, port, data: bytes) -> bool:
         """Envia ``data`` para um endereco unico (ip, porta)."""
-        self.sock.sendto(data, (ip, port))
+        # Evidencia de fio: registra apenas pacotes DATA (prefixo "2000") enviados.
+        if data[:4] == b"2000":
+            log("[wire TX -> {}:{}] {}".format(ip, port, data.decode("utf-8", errors="replace")))
+        return self._sendto(data, (ip, port))
 
     def close(self) -> None:
         """Sinaliza parada e fecha o socket (desbloqueia o recvfrom)."""

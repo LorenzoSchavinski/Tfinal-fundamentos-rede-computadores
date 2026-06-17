@@ -3,7 +3,6 @@ apelido: C | modo: local | endereco anunciado: 127.0.0.1:6003
 Config: apelido=C | token_time=1.0s | error_prob=0.0% | token_timeout=10.0s | min_token_interval=2.0s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
 [C] HELLO de A (entrou no anel)
-[C] HELLO de B (entrou no anel)
 No 'C' pronto. Digite 'help' para os comandos.
 Comandos:
   send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
@@ -14,8 +13,43 @@ Comandos:
   join | discover               reenvia DISCOVER (atualiza topologia)
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
+[C] HELLO de B (entrou no anel)
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
 [C] recebeu o token
 [C] enviando token para A
+[C] recebeu o token
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] gerou/inseriu um token na rede
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
@@ -26,6 +60,6 @@ Comandos:
   endereco: 127.0.0.1:6003  modo: local
   controladora: False  com_token: False  aguardando_retorno: False
   anel: ['A', 'B', 'C']
-  sucessor: A  fila: 0  primeiro_token_gerado: False
+  sucessor: A  fila: 0  primeiro_token_gerado: True
   tokens_perdidos: 0  tokens_duplicados: 0
-[C] enviando LEAVE (saida da rede)
+[C] recebeu o token

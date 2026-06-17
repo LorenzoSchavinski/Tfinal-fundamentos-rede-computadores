@@ -2,7 +2,6 @@
 apelido: C | modo: local | endereco anunciado: 127.0.0.1:6003
 Config: apelido=C | token_time=1.0s | error_prob=0.0% | token_timeout=8.0s | min_token_interval=2.0s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
-[C] HELLO de B (entrou no anel)
 No 'C' pronto. Digite 'help' para os comandos.
 Comandos:
   send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
@@ -13,22 +12,43 @@ Comandos:
   join | discover               reenvia DISCOVER (atualiza topologia)
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
+[C] HELLO de B (entrou no anel)
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
 [C] recebeu o token
 [C] enviando token para B
 [C] recebeu o token
 [C] enviando token para B
 [C] recebeu o token
 [C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] enviando token para A
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] recebeu o token
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] enviando token para A
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] recebeu o token
+[C] enviando token para A
+[C] nao estou com o token no momento (nada a retirar)
+[C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
-[C] enviando token para A
-[C] recebeu o token
-[C] token retirado da rede
-[C] recebeu o token
-[C] enviando token para A
-[C] recebeu o token
-[C] enviando token para A
-[C] recebeu o token
-[C] enviando LEAVE (saida da rede)

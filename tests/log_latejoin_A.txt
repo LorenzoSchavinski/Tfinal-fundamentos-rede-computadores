@@ -33,4 +33,3 @@ Comandos:
   sucessor: B  fila: 0  primeiro_token_gerado: True
   tokens_perdidos: 1  tokens_duplicados: 0
 [A] enviando token para B
-[A] enviando LEAVE (saida da rede)

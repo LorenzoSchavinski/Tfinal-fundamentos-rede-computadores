@@ -2,8 +2,6 @@
 apelido: C | modo: local | endereco anunciado: 127.0.0.1:6003
 Config: apelido=C | token_time=1.0s | error_prob=0.0% | token_timeout=10.0s | min_token_interval=0.5s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
-[C] HELLO de A (entrou no anel)
-[C] HELLO de B (entrou no anel)
 No 'C' pronto. Digite 'help' para os comandos.
 Comandos:
   send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
@@ -14,33 +12,68 @@ Comandos:
   join | discover               reenvia DISCOVER (atualiza topologia)
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
+[C] HELLO de B (entrou no anel)
+[C] HELLO de A (entrou no anel)
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
+[C] DISCOVER de A, respondendo HELLO
+[C] DISCOVER de B, respondendo HELLO
 [C] recebeu o token
 [C] enviando token para A
-[C] recebeu o token
-[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:B:A:maquinainexistente:2956690573:Ola A
 [C] repassando DADOS de B para A
+[wire TX -> 127.0.0.1:6001] 2000:B:A:maquinainexistente:2956690573:Ola A
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:A:C:maquinainexistente:2097710523:Teste er?o
+[C] CRC NAO confere de A (recebido=2097710523 calculado=897082383) -> NAK
+[C] DADOS de A: "Teste er?o" -> NAK
+[wire TX -> 127.0.0.1:6001] 2000:A:C:NAK:2097710523:Teste er?o
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:A:C:maquinainexistente:2097710523:Teste erro
+[C] DADOS de A: "Teste erro" -> ACK
+[wire TX -> 127.0.0.1:6001] 2000:A:C:ACK:2097710523:Teste erro
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
 [C] msg para BROADCAST enfileirada (1/10)
-[C] recebeu o token
 [C] enviando DADOS para BROADCAST (corrompido=False): "Ola galera"
+[wire TX -> 127.0.0.1:6001] 2000:C:BROADCAST:maquinainexistente:1281602951:Ola galera
+[wire RX <- 127.0.0.1:6002] 2000:C:BROADCAST:maquinainexistente:1281602951:Ola galera
 [C] BROADCAST concluido (deu a volta no anel)
 [C] enviando token para A
-[C] CRC NAO confere de A (recebido=2097710523 calculado=634826631) -> NAK
-[C] DADOS de A: "Teste erMo" -> NAK
-[C] recebeu o token
-[C] enviando token para A
-[C] DADOS de A: "Teste erro" -> ACK
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
-[C] token retirado da rede
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] nao estou com o token no momento (nada a retirar)
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
@@ -48,14 +81,29 @@ Comandos:
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
-[C] token retirado da rede
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
 [C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] nao estou com o token no momento (nada a retirar)
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
 [C] STATUS
   endereco: 127.0.0.1:6003  modo: local
-  controladora: False  com_token: False  aguardando_retorno: False
+  controladora: False  com_token: True  aguardando_retorno: False
   anel: ['A', 'B', 'C']
   sucessor: A  fila: 0  primeiro_token_gerado: False
-[C] recebeu o token
+  tokens_perdidos: 0  tokens_duplicados: 0
+[C] enviando token para A

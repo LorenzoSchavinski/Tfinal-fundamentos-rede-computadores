@@ -102,13 +102,17 @@ Os dois timers do controle de token (`timeout_token` na linha 4 e `tempo_minimo_
 [A] TOKEN DUPLICADO detectado (intervalo < minimo) -> removido da rede
 ```
 
-**Saida educada (cura do anel).** Uma maquina que encerra com `quit` difunde um aviso de saida; os nossos nos a removem e recompoem o anel sozinhos (ex.: `A->B->C->A` vira `A->C->A`), sem reinicializar:
-
-```
-[A] B saiu da rede -> recalculando anel
-```
+**Saida de um no (cura reativa do anel).** `quit` encerra o no silenciosamente, sem avisar os outros. A remocao acontece de forma reativa: quando alguem envia um DATA para o no ausente, o pacote retorna marcado `maquinainexistente`; o remetente imprime um aviso, descarta a mensagem da fila e remove o no ausente do anel (ex.: `A->B->C->A` vira `A->C->A`). Para ver a remocao acontecer numa demo, envie uma mensagem para o no que acabou de sair.
 
 Se sobrar so uma maquina no anel, ela segura o token quieto (sem enviar a si mesma) e retoma a circulacao quando outra entrar.
+
+**Timeout de dados (pacote perdido).** Se o remetente nao recebe seu proprio pacote de volta dentro do `timeout_token`, ele descarta a mensagem da fila e passa o token adiante, evitando que um unico pacote perdido congele o anel.
+
+**Wire log.** Todo pacote DATA enviado ou recebido, e qualquer pacote desconhecido/corrompido recebido, e impresso com os bytes crus no formato `[wire TX -> ip:porta] 2000:...` / `[wire RX <- ip:porta] ...`. Util para depuracao e para provar interoperabilidade na apresentacao. Nao requer nenhum comando; e automatico.
+
+**Normalizacao de apelidos.** Os apelidos sao convertidos para MAIUSCULAS e com espacos removidos antes de qualquer comparacao, entao uma letra minuscula ou espaco extra nao quebra a entrega. O texto das mensagens e mantido exatamente como digitado. Para a apresentacao: combinem com os outros grupos usar apelidos de uma unica letra maiuscula (A, B, C...).
+
+**Inicializacao robusta.** O DISCOVER e reemitido varias vezes durante a janela de descoberta, e o primeiro token so e gerado apos a lista de membros estabilizar. Isso evita que varios nos gerem tokens simultaneamente num start escalonado. O primeiro token pode levar alguns segundos a mais para aparecer; e normal.
 
 O `status` tambem mostra os contadores `tokens_perdidos` e `tokens_duplicados`, respondendo se houve token perdido ou mais de um token na rede. Uma maquina que vira controladora ao entrar atrasada (menor apelido entrando depois que o anel ja roda) tambem passa a vigiar token perdido, pois o monitor liga via `observed_activity`; portanto e possivel adicionar a maquina de menor apelido por ultimo sem perder a deteccao de token perdido.
 
@@ -131,7 +135,7 @@ Formatos exatos:
 - **Controle (campo `<controle>` de DADOS):** um de `maquinainexistente`, `ACK` ou `NAK`. O valor inicial e `maquinainexistente` (origem ainda nao sabe se o destino existe); o destino devolve `ACK` (recebido sem erro de CRC) ou `NAK` (erro de CRC, pede retransmissao).
 - **Destino especial:** `BROADCAST` entrega a mensagem a todos os nos do anel.
 - **Mensagem:** vai em bytes crus no fim do datagrama, sem escape, podendo conter `:` a vontade (o parser limita as divisoes para nunca quebrar a mensagem).
-- **LEAVE (`30:apelido:ip`) e extensao local**, fora da especificacao: avisa a saida educada de um no para os nossos proprios pares. Outros grupos nao o enviam e o ignoram como pacote desconhecido, entao ele **nao quebra a interoperabilidade**.
+O protocolo usa **somente** esses quatro tipos. Nao existe pacote LEAVE.
 
 ### CRC
 

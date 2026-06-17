@@ -69,7 +69,7 @@ def _from_lines(linhas: list) -> Config:
             "encontradas {}.".format(len(uteis))
         )
     return Config(
-        apelido=uteis[0],
+        apelido=uteis[0].strip().upper(),
         token_time=_to_float(uteis[1]),
         error_prob=_to_float(uteis[2]),
         token_timeout=_to_float(uteis[3]),

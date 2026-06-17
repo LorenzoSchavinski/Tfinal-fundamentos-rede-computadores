@@ -52,7 +52,7 @@ Fluxo textual de um datagrama recebido até virar ação:
                                                                            |
   console (stdin) --post(CMD_*)--------------------------------------------+
   vigia do token  --post(MON_TOKEN_TIMEOUT)--------------------------------+
-  threading.Timer --post(TIMER_FORWARD_TOKEN / EVAL_FIRST_TOKEN)-----------+
+  threading.Timer --post(TIMER_FORWARD_TOKEN / EVAL_FIRST_TOKEN / TIMER_DATA_RETURN_TIMEOUT)---+
                                                                            v
                                                               +-------------------------+
                                                               |  thread MOTOR (engine)  |
@@ -120,7 +120,7 @@ Fila thread-safe de eventos `(tipo, payload)`. É o ponto de serialização de t
 | **receptora (rx)** | `Transport.start` | Bloqueia em `recvfrom(2048)`; ao chegar datagrama, chama `on_datagram`, que faz `parse` e **posta** o evento de RX correspondente. Encerra quando o socket fecha. |
 | **motor (engine)** | `Node.start` | Único dono do estado. Laço `bus.get()` -> `_handlers[etype]`. Toda lógica de protocolo, token e comandos roda aqui, em série. |
 | **TokenMonitor (token-monitor)** | `Node.__init__`/`monitor.start` | Vigia do token, **só atua na controladora**. Acorda a cada 0,1 s; se o silêncio (sem token nem dados) passar de `token_timeout`, posta `MON_TOKEN_TIMEOUT`. |
-| **`threading.Timer`** | em `token_logic.py` / `node.start` | Temporizadores pontuais: ritmo do token (`TIMER_FORWARD_TOKEN` após `token_time`) e fim da janela de descoberta (`EVAL_FIRST_TOKEN`). Cada disparo só posta evento. |
+| **`threading.Timer`** | em `token_logic.py` / `node.start` | Temporizadores pontuais: ritmo do token (`TIMER_FORWARD_TOKEN` após `token_time`), fim da janela de descoberta (`EVAL_FIRST_TOKEN`) e timeout de retorno de dados (`TIMER_DATA_RETURN_TIMEOUT` após `token_timeout`). Cada disparo só posta evento. |
 | **console** | thread principal, `Console.run` | Lê `stdin`, traduz comandos em `CMD_*` e posta. Nunca toca o estado. |
 
 ---
@@ -158,6 +158,20 @@ A sincronização **não** usa locks sobre o estado. Ela se apoia em três peça
 
 O laço do motor (`_engine_loop`) envolve cada despacho de handler em `try/except Exception`, registrando o `traceback` e seguindo para o próximo evento. Assim, um pacote malformado ou estranho (por exemplo, de outro grupo durante a interoperação) **não derruba a thread do motor nem congela o nó**. Complementando, o caminho de retorno à origem em `_on_rx_data` **sempre libera/encaminha o token**, inclusive quando o `controle` que volta é inesperado (ou um NAK chega com a fila vazia): o token nunca fica preso por um valor de controle desconhecido, o que importa para interoperar com implementações de outros grupos.
 
+### Adições de tolerância a falhas
+
+Além do mecanismo de motor acima, as seguintes peças defensivas foram adicionadas (todas locais ao nó, invisíveis no fio):
+
+- **Timeout de retorno de dados** (`TIMER_DATA_RETURN_TIMEOUT`): quando um pacote DATA é enviado, um timer de duração `token_timeout` é armado. Se o pacote nunca retornar (peer morto ou pacote descartado na rede), o timer dispara: o nó loga o evento, descarta a mensagem da fila e encaminha o token — impedindo que um único pacote perdido congele o anel. Retornos tardios (após o timer) são ignorados para evitar duplo encaminhamento do token.
+
+- **Envios UDP seguros**: todas as chamadas `Transport.send_addr` são envoltas em tratamento de erro, de modo que um socket fechado ou um sucessor inacessível gere apenas um log, sem lançar exceção. O estado do token permanece consistente e o monitor da controladora pode acionar a recuperação normalmente.
+
+- **Guard da thread receptora**: o handler por datagrama na thread rx é envolvido em `try/except`, de forma que um pacote malformado ou hostil vindo de outro grupo não derrube a thread receptora.
+
+- **Log de fio** (`[wire TX]` / `[wire RX]`): todo pacote DATA enviado ou recebido, e todo datagrama desconhecido/não-parseável, é registrado verbatim com ip:porta do peer. Serve de evidência de interoperabilidade durante a apresentação e facilita depuração.
+
+- **Normalização de apelidos**: apelidos são convertidos para maiúsculas e trimados antes de qualquer comparação (apelido próprio, destino digitado, apelidos recebidos em pacotes). Isso evita que diferença de caixa ou espaço em branco quebre a entrega silenciosamente. Os bytes da mensagem e o formato de fio são inalterados.
+
 ---
 
 ## 7. Protocolo e formato dos pacotes (interoperabilidade)
@@ -168,13 +182,12 @@ Todo o tráfego é montado/desmontado em `ring/protocol/packets.py`. O cabeçalh
 |---|---|---|---|
 | DISCOVER | `10` | `10:<apelido>:<ip>` | apelido e IP da origem |
 | HELLO | `20` | `20:<apelido>:<ip>` | apelido e IP da origem |
-| LEAVE | `30` | `30:<apelido>:<ip>` | apelido e IP de quem sai (extensão local) |
 | TOKEN | `1000` | `1000` | nenhum (payload é só `1000`) |
 | DADOS | `2000` | `2000:<origem>:<destino>:<controle>:<crc>:<mensagem>` | origem, destino, controle, CRC, mensagem |
 
 Valores do campo `controle`: `maquinainexistente` (CTRL_NONE, estado inicial), `ACK`, `NAK`.
 
-> **Honestidade sobre o LEAVE**: o pacote `30:<apelido>:<ip>` é uma **extensão local** desta implementação para a saída educada (`quit`). Ele **não faz parte do protocolo de fio do enunciado**: outros grupos não o enviam e, ao recebê-lo, o tratam como datagrama desconhecido (`UNKNOWN`) e o **ignoram com segurança**. Apenas os nossos próprios nós o honram (`_on_rx_leave`). Portanto o LEAVE **não afeta a interoperabilidade**.
+> **Fidelidade ao protocolo**: o enunciado define exatamente quatro tipos de pacote (DISCOVER/10, HELLO/20, token/1000, dados/2000). Nenhum pacote de saída ("LEAVE") é especificado. Como grupos diferentes devem interoperar no mesmo anel físico, emitir um tipo não especificado seria um risco; por isso a implementação **não emite pacotes fora do contrato do enunciado**.
 
 Exemplo real de DADOS (formato do enunciado): `2000:B:A:maquinainexistente:19385749:Oi pessoal!`.
 
@@ -190,11 +203,12 @@ Detalhes de implementação relevantes para interoperar:
 
 ## 8. Formação do anel
 
-1. Ao subir (`Node.start`), o nó registra a si mesmo no `Ring` e envia **DISCOVER em broadcast**. No modo LAN o broadcast vai para `255.255.255.255` na **porta 6000**; no modo local, é simulado enviando uma cópia a cada peer conhecido.
+1. Ao subir (`Node.start`), o nó registra a si mesmo no `Ring` e envia **DISCOVER em broadcast repetidamente** (aproximadamente a cada 0,5 s durante a janela de descoberta `--discovery`). No modo LAN o broadcast vai para `255.255.255.255` na **porta 6000**; no modo local, é simulado enviando uma cópia a cada peer conhecido. O reenvio periódico garante que máquinas que sobem em momentos ligeiramente diferentes ainda se descubram mutuamente antes da eleição do token inicial.
 2. Quem recebe DISCOVER (`_on_rx_discover`) atualiza o anel e responde **HELLO** em broadcast, identificando-se.
 3. Quem recebe HELLO (`_on_rx_hello`) registra o novo membro.
 4. A ordem do anel é a **ordenação por `(apelido, ip)`** (`Ring.order`) — apelido como chave primária (ordem alfabética), ip apenas como desempate determinístico. Cada nó calcula o **sucessor** circular com `Ring.successor`.
 5. A **controladora** é o **menor apelido** (`Ring.controller_apelido`), eleita implicitamente por todos verem o mesmo conjunto.
+6. A avaliação do token inicial (`EVAL_FIRST_TOKEN`) é **adiada até o fim da janela de descoberta E até a lista de membros ter ficado estável por uma janela completa**. Isso evita que partidas escalonadas levem múltiplos nós a acreditar que estão sozinhos e cada um gere um token — apenas o nó com o menor apelido globalmente gera exatamente um token inicial; nós que entram tarde nunca geram um segundo token.
 
 Supressão de eco: em `on_datagram`, um DISCOVER/HELLO cujo apelido é o próprio é descartado (o broadcast volta para quem enviou).
 
@@ -253,7 +267,7 @@ O datagrama deu a volta. Conforme o controle:
 
 - **BROADCAST**: imprime "BROADCAST concluído", remove da fila (`_drop_head`) e libera o token;
 - **ACK**: "mensagem entregue com sucesso", remove da fila e libera;
-- **maquinainexistente** (CTRL_NONE): destino ausente/desligado, remove da fila e libera;
+- **maquinainexistente** (CTRL_NONE): destino ausente/desligado; além de remover da fila (`_drop_head`) e liberar o token (comportamento do enunciado), o nó **também remove o membro ausente do `Ring` e recomputa o sucessor** (`Ring.remove` + `_recompute_role`). O anel se cura sem nenhum pacote extra — usa exclusivamente o sinal já definido pelo enunciado (`maquinainexistente`), mantendo plena interoperabilidade;
 - **NAK**: se o item ainda não foi retransmitido, marca `retransmit_used=True` e `no_error=True` (reenvio **sem injeção** na próxima passagem do token) e libera; se já houve a retransmissão única, descarta a mensagem e libera.
 
 Liberar significa `waiting_for_data_return = False`, despausar o monitor (se controladora) e `_forward_token()`.
@@ -330,13 +344,14 @@ Trecho real (broadcast em todas as máquinas — `tests/log_A.txt`, `tests/log_B
 
 Máquinas podem **entrar em execução**: ao subir (ou via comando `join`/`discover`), enviam DISCOVER; as demais respondem HELLO. `_update_member` chama `Ring.update` e `_recompute_role`, recomputando **sucessor** e **controladora** a partir do novo conjunto, **sem reinicialização**. Se um apelido reaparece com endereço diferente, `Ring.update` retorna `"changed"` e o nó avisa ("mudou de endereço").
 
-Além da entrada, uma máquina que **sai limpa** (comando `quit`) agora difunde um **LEAVE** em broadcast (em `_shutdown`, com o socket ainda aberto). Quem recebe (`_on_rx_leave`) chama `Ring.remove`, recomputa sucessor/controladora (`_recompute_role`) e o anel **se cura sozinho** entre os nossos nós — por exemplo, `A->B->C->A` passa a `A->C->A`. Trecho real (`tests/log_leave_A.txt`), quando B sai e A reconstrói o anel:
+**Saída e auto-cura**: a implementação **não emite pacote LEAVE** (o enunciado não o define; emiti-lo num anel compartilhado com outros grupos seria um risco de interoperabilidade). A cura do anel usa exclusivamente o mecanismo reativo já previsto no enunciado: quando um pacote DATA retorna à origem com controle `maquinainexistente`, o nó não apenas descarta a mensagem e libera o token (comportamento base do enunciado) como também **remove o membro ausente do `Ring` e recomputa o sucessor** (`Ring.remove` + `_recompute_role`). O anel `A->B->C->A` passa a `A->C->A` automaticamente após qualquer tentativa de envio a B, sem nenhum pacote extra e com plena compatibilidade com outros grupos. Trecho real (`tests/log_leave_A.txt`), quando B sai e A envia dados a B:
 
 ```
-[A] B saiu da rede -> recalculando anel
+[A] maquinainexistente: B nao esta no anel -> removendo e recalculando anel
+[A] enviando token para C
 ```
 
-Limitação declarada com franqueza: um **CRASH abrupto** (queda sem enviar LEAVE) **não** é curado automaticamente. A expulsão unilateral por timeout foi **deliberadamente evitada**: num anel compartilhado com outros grupos, cada nó perceberia silêncios diferentes e removeria membros distintos, **divergindo a topologia** entre as máquinas; a recuperação de um crash é, portanto, **re-sincronização manual** (subir o nó de novo / `join`). Pela mesma razão de anel compartilhado, o "portão" de entrada do enunciado ("nova máquina só entra quando somente o token estiver circulando") é tratado como **disciplina do operador**, não imposto pelo código: a topologia é reavaliada de forma incremental a cada DISCOVER/HELLO.
+**Limitação**: departures silenciosos (crash sem nenhuma mensagem pendente para o nó ausente) só são curados quando algum nó tenta enviar dados àquele membro — é o modelo reativo do próprio enunciado. Liveness proativa (ping/heartbeat) foi **intencionalmente omitida** para manter interoperabilidade: num anel compartilhado, timeouts de liveness divergiriam entre grupos e gerariam topologias inconsistentes. Pela mesma razão, o "portão" de entrada ("nova máquina só entra quando somente o token estiver circulando") é **disciplina do operador**, não imposto pelo código.
 
 **Caso degenerado (uma única máquina).** Se as demais máquinas saem e resta **apenas uma** no anel, ela **não** envia o token para si mesma: segura o token **em silêncio** (loga uma vez "sou a unica maquina no anel; segurando o token ate outra entrar") e volta a circulá-lo assim que outra máquina entra (DISCOVER/HELLO), logando "nova maquina entrou; retomando a circulacao do token". O enunciado exige no mínimo 3 máquinas, então é um caso degenerado fora do cenário pedido, tratado de forma limpa apenas para evitar um loop inútil do token contra o próprio endereço.
 
@@ -548,11 +563,11 @@ E o anel **segue circulando** depois do evento — o próprio B continua receben
 [B] enviando token para C
 ```
 
-### 18.8 Saída educada e cura do anel (B sai, A->C)
-B encerra com `quit` e difunde LEAVE; A o remove e recompõe o anel `['A','B','C']` para `['A','C']`, passando a encaminhar o token direto para C (`tests/log_leave_A.txt`):
+### 18.8 Cura do anel por `maquinainexistente` (B sai, A->C)
+B encerra. Na próxima vez que A tenta enviar dados para B, o pacote dá a volta com controle `maquinainexistente`; A remove B do `Ring`, recompõe o anel `['A','B','C']` para `['A','C']` e passa a encaminhar o token direto para C (`tests/log_leave_A.txt`):
 
 ```
-[A] B saiu da rede -> recalculando anel
+[A] maquinainexistente: B nao esta no anel -> removendo e recalculando anel
 [A] enviando token para C
 ```
 
@@ -574,7 +589,7 @@ A entra depois de B e C já circularem o token; por ter o menor apelido, torna-s
 | Fila por máquina, 1 mensagem por vez | `MessageQueue`; `_on_rx_token` só envia o `peek()` |
 | Token circulando | `TokenLogicMixin` (`_on_rx_token`, `_forward_token`) |
 | Topologia por lista ordenada, sucessor circular | `Ring.order` / `Ring.successor` |
-| 3 tipos de pacote (controle/token/dados) + DISCOVER/HELLO | `ring/protocol/packets.py` |
+| 4 tipos de pacote do enunciado: DISCOVER/HELLO/token/dados | `ring/protocol/packets.py` |
 | Arquivo de config (5 linhas, vírgula decimal) | `ring/config.py` |
 | DISCOVER broadcast porta 6000 + resposta HELLO | `Node.start`, `_on_rx_discover`; LAN usa 6000 |
 | Anel em ordem alfabética; primeira máquina gera token | `Ring.order` (apelido); `_on_eval_first_token` (menor apelido) |
@@ -605,7 +620,7 @@ A entra depois de B e C já circularem o token; por ter o menor apelido, torna-s
 - **CRC**: convenção adotada = escopo **somente a mensagem** e representação **decimal** (string). Precisa ser confirmada com os outros grupos (o enunciado não fixa o escopo nem a base; o exemplo `19385749` é ilustrativo e não bate com o CRC-32 real de "Oi pessoal!", que é `1751094473`).
 - **IPv4** apenas (`socket.AF_INET`); `detect_ip` usa o truque do `connect` a `8.8.8.8` para achar o IP de saída.
 - **Apelidos únicos**: o anel é indexado por apelido; colisão é tratada como troca de endereço (`Ring.update -> "changed"`), não como dois nós distintos. Em particular, uma colisão de apelido entre grupos **sobrescreve** a entrada no mapa de endereços — o enunciado pressupõe apelidos únicos (`A`, `B`, `C`, ...).
-- **Saída e crash**: a **saída educada** (`quit`) é tratada — o nó difunde LEAVE e os demais curam o anel (`Ring.remove` + `_recompute_role`). Já um **crash abrupto** (sem LEAVE) **não** é curado automaticamente: a expulsão unilateral por timeout foi evitada de propósito porque, num anel compartilhado com outros grupos, divergiria a topologia entre os nós; a recuperação de crash é **manual** (re-subir / `join`). O LEAVE (`30:apelido:ip`) é **extensão local** e não trafega para outros grupos como pacote conhecido (eles o ignoram).
+- **Saída e cura**: a implementação não emite pacote LEAVE (não especificado pelo enunciado). A auto-cura usa o sinal `maquinainexistente` do próprio enunciado: quando um DATA retorna com esse controle, o nó remove o membro ausente e recomputa o sucessor. Departures sem mensagens pendentes (crash sem dados em voo para o nó ausente) só são curados quando alguém tentar enviar dados àquele membro — modelo reativo do enunciado. Liveness proativa foi omitida intencionalmente para preservar interoperabilidade (ver Seção 14).
 - **Portão de entrada não imposto**: o "nova máquina só entra quando somente o token estiver circulando" é **disciplina do operador**, não verificado pelo código, pela mesma razão de anel compartilhado — a topologia é reavaliada incrementalmente a cada DISCOVER/HELLO.
 - **Detecção de duplicata é heurística**: baseia-se em tempo (`intervalo < tempo_minimo_entre_tokens`), logo depende do dimensionamento correto desse parâmetro pela volta do anel (ver Seção 15).
 - **Timers de controle são locais e devem ser dimensionados pela volta do anel** (ver Seção 15): `timeout_do_token` **maior** que a volta (~`numero_de_maquinas x tempo_token_e_dados`) para não declarar perdido um token saudável parado a jusante; `tempo_minimo_entre_tokens` **abaixo** da volta porém **acima de ~metade dela** para flagrar duplicata sem alarme falso no token único. Não viajam no fio, então cada grupo ajusta os seus.
@@ -618,7 +633,9 @@ A entra depois de B e C já circularem o token; por ter o menor apelido, torna-s
 
 ## 21. Conclusão
 
-A solução implementa uma rede em anel com passagem de token sobre UDP cobrindo os requisitos do enunciado: formação automática do anel (DISCOVER/HELLO), circulação do token, fila de até 10 mensagens com destino por item, entrega unicast com ACK/NAK por CRC-32, retransmissão única, broadcast, controle de token perdido (timeout baseado em atividade) e duplicado (intervalo mínimo), geração/retirada manual, e alteração topológica em execução.
+A solução implementa uma rede em anel com passagem de token sobre UDP cobrindo os requisitos do enunciado: formação automática do anel (DISCOVER/HELLO com reenvio periódico para partidas escalonadas), circulação do token, fila de até 10 mensagens com destino por item, entrega unicast com ACK/NAK por CRC-32, retransmissão única, broadcast, controle de token perdido (timeout baseado em atividade) e duplicado (intervalo mínimo), geração/retirada manual, e alteração topológica em execução.
+
+A implementação **não emite nenhum pacote fora do enunciado**: a auto-cura do anel após saída de membros é feita pelo sinal `maquinainexistente` já definido no protocolo, estendendo o comportamento da origem para remover o membro ausente e recalcular o sucessor. Robustez adicional (timeout de retorno de dados, envios seguros, guard da thread receptora, log de fio e normalização de apelidos) é inteiramente local ao nó e invisível no fio.
 
 O ponto de projeto que sustenta a corretude e a simplicidade é o **modelo de thread única de motor sobre um barramento de eventos**: todas as threads externas apenas postam eventos, e o `Node` é o único a mutar o estado, serializado pelo `queue.Queue`. Isso elimina locks sobre o estado, deixando a sincronização restrita ao barramento, ao contador `epoch` (que invalida timers obsoletos) e ao lock de impressão. As camadas (`protocol`, `core`, `network`, `ui`) isolam responsabilidades, e a camada de protocolo concentra o contrato de fio necessário à interoperabilidade entre grupos. Os logs reais em `tests/log_A.txt`, `tests/log_B.txt` e `tests/log_C.txt` demonstram o funcionamento sobre três máquinas.
 

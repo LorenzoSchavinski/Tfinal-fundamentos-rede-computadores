@@ -2,7 +2,6 @@
 apelido: B | modo: local | endereco anunciado: 127.0.0.1:6002
 Config: apelido=B | token_time=1.0s | error_prob=0.0% | token_timeout=8.0s | min_token_interval=2.0s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
-[B] HELLO de A (entrou no anel)
 No 'B' pronto. Digite 'help' para os comandos.
 Comandos:
   send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
@@ -13,9 +12,31 @@ Comandos:
   join | discover               reenvia DISCOVER (atualiza topologia)
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
+[B] HELLO de A (entrou no anel)
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de A, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
+[B] DISCOVER de C, respondendo HELLO
 [B] DISCOVER de C, respondendo HELLO
 [B] recebeu o token
 [B] enviando token para C
 [B] recebeu o token
 [B] enviando token para C
-[B] enviando LEAVE (saida da rede)

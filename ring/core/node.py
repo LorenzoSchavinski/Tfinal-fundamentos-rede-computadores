@@ -23,7 +23,6 @@ from ring.protocol.packets import (
     CTRL_NONE,
     build_discover,
     build_hello,
-    build_leave,
     parse,
     set_controle,
 )
@@ -80,6 +79,7 @@ class Node(TokenLogicMixin, CommandsMixin):
         self._segurando_sozinho = False  # latch: True enquanto seguramos o token por estar sozinho (loga so uma vez)
 
         self._engine = None
+        self._first_token_timer = None  # timer de EVAL_FIRST_TOKEN, reagendado a cada novo membro
 
     # ------------------------------------------------------------------ bus
     def post(self, etype, **kw) -> None:
@@ -114,12 +114,6 @@ class Node(TokenLogicMixin, CommandsMixin):
                 self.post("RX_DISCOVER", apelido=ap, ip=end[0], port=end[1])
             else:
                 self.post("RX_HELLO", apelido=ap, ip=end[0], port=end[1])
-        elif tipo == "LEAVE":
-            ap = p["apelido"]
-            # Supressao de eco proprio: ignora o nosso anuncio que volta no broadcast.
-            if ap == self.apelido:
-                return
-            self.post("RX_LEAVE", apelido=ap, ip=p["ip"])
         elif tipo == "TOKEN":
             # Reseta o relogio de atividade do monitor imediatamente (thread receptora),
             # antes mesmo de o motor processar o evento. Garante que token circulando
@@ -128,9 +122,12 @@ class Node(TokenLogicMixin, CommandsMixin):
             self.post("RX_TOKEN")
         elif tipo == "DATA":
             # Idem para pacotes DATA: qualquer atividade no anel prova que o token existe.
+            log("[wire RX <- {}:{}] {}".format(addr[0], addr[1], p["raw"].decode("utf-8", errors="replace")))
             self.monitor.note_activity()
             self.post("RX_DATA", parsed=p, raw=p["raw"])
-        # UNKNOWN: ignorado.
+        else:
+            # UNKNOWN/nao parseavel: registra cru para disputa de interop e ignora.
+            log("[wire RX <- {}:{}] BAD/unknown: {}".format(addr[0], addr[1], p["raw"].decode("utf-8", errors="replace")))
 
     # ----------------------------------------------------------- ciclo de vida
     def start(self) -> None:
@@ -138,15 +135,51 @@ class Node(TokenLogicMixin, CommandsMixin):
         self.transport.start()
         self.ring.update(self.apelido, self.advertise_ip, self.port)
         self._recompute_role()
-        self.transport.broadcast(build_discover(self.apelido, self.advertise_ip))
         self._engine = threading.Thread(target=self._engine_loop, name="engine", daemon=True)
         self._engine.start()
+        # DISCOVER repetido ao longo da janela: em partidas escalonadas o primeiro
+        # broadcast pode se perder (socket do par ainda nao escutando, UDP sem
+        # retransmissao). Reenviar varias vezes deixa os nos se descobrirem mesmo
+        # com perdas iniciais. DISCOVER eh pacote da spec e o par so responde HELLO
+        # (idempotente, dedup por apelido), entao permanece interop-safe.
+        self._broadcast_discover_repeated()
         # Janela de descoberta: depois dela, avalia se deve criar o token inicial.
-        threading.Timer(self.discovery_window, lambda: self.post("EVAL_FIRST_TOKEN")).start()
+        # O timer eh (re)agendado a cada novo membro (_schedule_first_token_eval), de
+        # modo que a avaliacao so dispara apos a membership ficar estavel.
+        self._schedule_first_token_eval()
         # Monitor sobe desabilitado; so liga quando for controladora com token.
         self.monitor.start()
 
     discovery_window = 3.0  # sobrescrito por main antes de start(), se desejado
+    discover_interval = 0.5  # intervalo entre reenvios de DISCOVER na janela
+
+    def _broadcast_discover_repeated(self) -> None:
+        """Reemite DISCOVER a cada ``discover_interval`` ate fechar a janela.
+
+        O primeiro envio eh imediato; os demais sao agendados por timers que se
+        encadeiam ate o tempo decorrido alcancar ``discovery_window``.
+        """
+        pacote = build_discover(self.apelido, self.advertise_ip)
+
+        def envia(restante: float) -> None:
+            self.transport.broadcast(pacote)
+            if restante > self.discover_interval:
+                threading.Timer(self.discover_interval, envia, args=(restante - self.discover_interval,)).start()
+
+        envia(self.discovery_window)
+
+    def _schedule_first_token_eval(self) -> None:
+        """(Re)agenda a avaliacao do token inicial para daqui a ``discovery_window``.
+
+        Substitui qualquer timer pendente, adiando a decisao enquanto a membership
+        ainda muda. So o ultimo timer agendado dispara EVAL_FIRST_TOKEN.
+        """
+        if getattr(self, "_first_token_timer", None) is not None:
+            self._first_token_timer.cancel()
+        self._first_token_timer = threading.Timer(
+            self.discovery_window, lambda: self.post("EVAL_FIRST_TOKEN")
+        )
+        self._first_token_timer.start()
 
     def _engine_loop(self) -> None:
         # Thread unica dona do estado: consome o barramento e despacha.
@@ -163,16 +196,14 @@ class Node(TokenLogicMixin, CommandsMixin):
         self._shutdown()
 
     def _shutdown(self) -> None:
+        # Encerramento limpo. NAO emitimos o pacote "30"/LEAVE: ele nao faz parte da
+        # spec (10/20/1000/2000) e nao deve ir num anel compartilhado. A saida deste
+        # no eh detectada pelos pares via o caminho reativo "maquinainexistente".
         self.monitor.stop()
-        # Saida educada: avisa os pares para nos removerem e refazerem o anel.
-        # Enviado com o socket ainda aberto, antes de transport.close().
-        leave_pkt = build_leave(self.apelido, self.advertise_ip)
-        log("[{}] enviando LEAVE (saida da rede)".format(self.apelido))
-        self.transport.broadcast(leave_pkt)
         self.transport.close()
 
     def close(self) -> None:
-        """Solicita encerramento do motor e aguarda o termino (inclusive _shutdown/LEAVE)."""
+        """Solicita encerramento do motor e aguarda o termino (inclusive _shutdown)."""
         self.post("CMD_QUIT")
         if self._engine is not None and self._engine.is_alive():
             self._engine.join(timeout=5)
@@ -195,12 +226,15 @@ class Node(TokenLogicMixin, CommandsMixin):
         if not self._is_alone() and not self.has_token:
             self._segurando_sozinho = False
 
-    def _send(self, target_apelido, target_addr, data) -> None:
-        """Envia ``data`` ao endereco do alvo (tipicamente o sucessor)."""
+    def _send(self, target_apelido, target_addr, data) -> bool:
+        """Envia ``data`` ao endereco do alvo (tipicamente o sucessor).
+
+        Retorna True se o envio saiu, False se nao havia endereco ou o socket falhou.
+        """
         if target_addr is None:
             log("[{}] sem endereco para '{}', pacote descartado".format(self.apelido, target_apelido))
-            return
-        self.transport.send_addr(target_addr[0], target_addr[1], data)
+            return False
+        return self.transport.send_addr(target_addr[0], target_addr[1], data)
 
     def _successor(self):
         """(apelido, (ip, porta)) do sucessor, ou (None, None) se indefinido."""
@@ -215,9 +249,9 @@ class Node(TokenLogicMixin, CommandsMixin):
         suc = self.ring.successor(self.apelido)
         return suc is None or suc[0] == self.apelido
 
-    def _send_to_successor(self, data) -> None:
+    def _send_to_successor(self, data) -> bool:
         ap, addr = self._successor()
-        self._send(ap, addr, data)
+        return self._send(ap, addr, data)
 
     def _refresh_monitor_pause(self) -> None:
         """Pausa o monitor sempre que o token estiver comprovadamente aqui ou aguardando retorno.
@@ -237,6 +271,13 @@ class Node(TokenLogicMixin, CommandsMixin):
         res = self.ring.update(apelido, ip, port)
         if res == "changed":
             log("[{}] AVISO: '{}' mudou de endereco (rejuncao com novo IP ou colisao de apelido)".format(self.apelido, apelido))
+        # Membro novo durante a fase de descoberta: adia a avaliacao do token
+        # inicial por mais uma janela, ate a membership ficar quieta. So entao o
+        # menor apelido conhecido equivale ao menor global e apenas ele gera.
+        # Se um token ja existe (gerado ou observado), nao adia nada: late-join
+        # nunca cria um segundo token (o guard de _on_eval_first_token continua).
+        if res == "new" and not self.first_token_generated and not self.observed_activity:
+            self._schedule_first_token_eval()
         self._recompute_role()
         # Estavamos sozinhos segurando o token e outra maquina acabou de entrar: retoma a circulacao.
         if self.has_token and not self.waiting_for_data_return and not self._is_alone() and self._segurando_sozinho:
@@ -258,14 +299,6 @@ class Node(TokenLogicMixin, CommandsMixin):
         if self._update_member(apelido, ip, port) == "new":
             log("[{}] HELLO de {} (entrou no anel)".format(self.apelido, apelido))
 
-    def _on_rx_leave(self, apelido, ip) -> None:
-        # Saida educada de um par: remove do anel e recalcula o papel. O sucessor
-        # eh calculado ao vivo no proximo envio, entao nao ha trabalho extra.
-        if apelido != self.apelido and apelido in self.ring.members():
-            self.ring.remove(apelido)
-            log("[{}] {} saiu da rede -> recalculando anel".format(self.apelido, apelido))
-            self._recompute_role()
-
     def _on_rx_data(self, parsed, raw) -> None:
         o = parsed["origem"]
         d = parsed["destino"]
@@ -277,6 +310,11 @@ class Node(TokenLogicMixin, CommandsMixin):
         if o == self.apelido:
             # Datagrama deu a volta e voltou a origem (eu). Trata BROADCAST antes.
             # Toda saida conhecida libera o token; _drop_head remove o item da fila.
+            if not self.waiting_for_data_return:
+                # Retorno tardio: o timeout ja desistiu deste DATA e liberou o token.
+                # Nao mexe na fila nem repassa outro token (evitaria token duplicado).
+                log("[{}] retorno tardio de dados ignorado".format(self.apelido))
+                return
             release = True
             if d == BROADCAST:
                 log("[{}] BROADCAST concluido (deu a volta no anel)".format(self.apelido))
@@ -287,6 +325,13 @@ class Node(TokenLogicMixin, CommandsMixin):
             elif ctrl == CTRL_NONE:
                 log("[{}] destino {} ausente/desligado (maquinainexistente)".format(self.apelido, d))
                 self._drop_head()
+                # Cura reativa da topologia: o destino nao existe mais no anel.
+                # Remove-o e recalcula sucessor/controladora para que o token passe
+                # a saltar o no ausente. Usa so o sinal da spec (nenhum pacote extra).
+                if d != self.apelido and d != BROADCAST and d in self.ring.members():
+                    log("[{}] removendo {} do anel (maquinainexistente)".format(self.apelido, d))
+                    self.ring.remove(d)
+                    self._recompute_role()
             elif ctrl == CTRL_NAK:
                 head = self.queue.peek()
                 if head is None:
@@ -341,10 +386,10 @@ class Node(TokenLogicMixin, CommandsMixin):
 Node._handlers = {
     "RX_DISCOVER": Node._on_rx_discover,
     "RX_HELLO": Node._on_rx_hello,
-    "RX_LEAVE": Node._on_rx_leave,
     "RX_TOKEN": Node._on_rx_token,
     "RX_DATA": Node._on_rx_data,
     "TIMER_FORWARD_TOKEN": Node._on_timer_forward_token,
+    "TIMER_DATA_RETURN_TIMEOUT": Node._on_timer_data_return_timeout,
     "CMD_SEND": Node._on_cmd_send,
     "CMD_ADD_TOKEN": Node._on_cmd_add_token,
     "CMD_REMOVE_TOKEN": Node._on_cmd_remove_token,

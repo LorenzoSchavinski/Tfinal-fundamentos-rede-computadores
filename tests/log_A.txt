@@ -13,23 +13,51 @@ Comandos:
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
 [A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B, respondendo HELLO
 [A] DISCOVER de C, respondendo HELLO
 [A] sou a primeira maquina (menor apelido) e nenhum token observado -> gerando token inicial
 [A] gerou/inseriu um token na rede
 [A] recebeu o token
 [A] enviando token para B
-[A] recebeu o token
-[A] enviando token para B
+[wire RX <- 127.0.0.1:6003] 2000:B:A:maquinainexistente:2956690573:Ola A
 [A] DADOS de B: "Ola A" -> ACK
+[wire TX -> 127.0.0.1:6002] 2000:B:A:ACK:2956690573:Ola A
 [A] recebeu o token
 [A] enviando token para B
 [A] recebeu o token
+[A] enviando token para B
 [A] msg para C enfileirada (1/10)
+[A] recebeu o token
 [A] enviando DADOS para C (corrompido=True): "Teste erro"
+[wire TX -> 127.0.0.1:6002] 2000:A:C:maquinainexistente:2097710523:Tes?e erro
+[wire RX <- 127.0.0.1:6003] 2000:A:C:NAK:2097710523:Tes?e erro
 [A] RETRANSMISSAO: NAK recebido de C, reenviando msg correta na proxima passagem do token
 [A] enviando token para B
 [A] recebeu o token
 [A] enviando DADOS para C (corrompido=False): "Teste erro"
+[wire TX -> 127.0.0.1:6002] 2000:A:C:maquinainexistente:2097710523:Teste erro
+[wire RX <- 127.0.0.1:6003] 2000:A:C:ACK:2097710523:Teste erro
 [A] mensagem entregue com sucesso (ACK)
 [A] enviando token para B
 [A] recebeu o token
@@ -38,14 +66,15 @@ Comandos:
 [A] enviando token para B
 [A] recebeu o token
 [A] enviando token para B
+[wire RX <- 127.0.0.1:6003] 2000:C:BROADCAST:maquinainexistente:1281602951:Ola galera
 [A] BROADCAST de C: "Ola galera"
+[wire TX -> 127.0.0.1:6002] 2000:C:BROADCAST:maquinainexistente:1281602951:Ola galera
 [A] recebeu o token
 [A] enviando token para B
 [A] recebeu o token
 [A] enviando token para B
 [A] recebeu o token
-[A] enviando token para B
-[A] nao estou com o token no momento (nada a retirar)
+[A] token retirado da rede
 [A] TOKEN PERDIDO detectado (timeout) -> gerando novo token
 [A] gerou/inseriu um token na rede
 [A] recebeu o token
@@ -57,4 +86,3 @@ Comandos:
   sucessor: B  fila: 0  primeiro_token_gerado: True
   tokens_perdidos: 1  tokens_duplicados: 0
 [A] recebeu o token
-[A] enviando LEAVE (saida da rede)

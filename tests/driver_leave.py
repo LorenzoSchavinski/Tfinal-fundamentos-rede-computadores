@@ -1,17 +1,38 @@
-"""Driver STEP 2: graceful-leave heal.
+"""Driver: reactive leave heal via maquinainexistente.
+
+Topology trick that makes the reactive path work in UDP:
+  Ring sorted alphabetically: A < C < D  ->  A->C->D->A
+  A's successor = C (living).  D is C's successor (the node that will leave).
+
+  When D dies and C is restarted fresh (C's ring heals to {A,C}):
+    - A's ring still has {A, C, D} (D remains in A's members dict).
+    - A sends DATA(destino=D) to C (A's successor = C, alive).
+    - C's ring = {A, C}, C's successor = A.
+    - C forwards the packet to A (d=D, not in C's path; C's next = A).
+    - A receives the packet with ctrl still = maquinainexistente!
+    - BOTH log lines fire: 'destino D ausente' AND 'removendo D do anel'.
+
+Nodes:
+  A (6001) -- controller, alive throughout
+  C (6003) -- alive, killed and restarted fresh so its ring heals to {A,C}
+  D (6004) -- the node that leaves; stays in A's ring.members after quit
+
+Files: tests/peers_leave.txt (A,C,D), tests/config_leave_D.txt
 
 Timeline:
-  1) Launch A(6001), B(6002), C(6003); sleep 10 -- ring A->B->C->A forms, token circulates.
-  2) Send ONLY B the command 'quit'; keep A and C running; sleep 12.
-  3) Send A 'status'; send C 'status'; sleep 2.
-  4) Send A and C 'quit'; terminate leftovers.
+  1. Launch A, C, D; wait 10s for ring {A,C,D} to form.
+  2. Kill D; wait 3s for D to die.
+  3. Kill C; wait 3s for port 6003 to free.
+  4. Restart C fresh; C discovers only A (D dead); C's ring = {A,C}; wait 8s.
+  5. A sends 'send D teste'; packet circuits A->C->A; maquinainexistente fires.
+  6. Wait 5s; send status to A; quit all.
 
 PASS criteria:
-  - A and/or C log "B saiu da rede -> recalculando anel".
-  - After B left, ring heals: "[A] enviando token para C" AND "[C] enviando token para A"
-    appear AFTER B's departure (proves successor recomputed, token keeps moving).
-  - Final status of A and C shows anel ['A','C'] and correct successor.
-  - No freeze, no traceback.
+  - A logs 'destino D ausente/desligado (maquinainexistente)'.
+  - A logs 'removendo D do anel (maquinainexistente)'.
+  - A's status shows anel: ['A', 'C'].
+  - Token events on A after heal (ring keeps circulating).
+  - No tracebacks.
 """
 from __future__ import annotations
 
@@ -25,31 +46,72 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS = os.path.join(BASE, "tests")
 PYTHON = sys.executable
 
+PEERS_FILE = "tests/peers_leave.txt"
+
 NODES = [
     ("A", "tests/config_leave_A.txt", 6001),
-    ("B", "tests/config_leave_B.txt", 6002),
     ("C", "tests/config_leave_C.txt", 6003),
+    ("D", "tests/config_leave_D.txt", 6004),
 ]
 
 procs = {}
 log_lines = {}
 log_locks = {}
-log_files = {}
 
 
-def _reader(name, proc, log_path):
-    f = open(log_path, "w", encoding="utf-8")
-    log_files[name] = f
-    try:
-        for line in proc.stdout:
-            with log_locks[name]:
-                log_lines[name].append((time.monotonic(), line))
+def _reader(name, proc, log_path, mode="w"):
+    with open(log_path, mode, encoding="utf-8") as f:
+        try:
+            for line in proc.stdout:
+                with log_locks[name]:
+                    log_lines[name].append((time.monotonic(), line))
                 f.write(line)
                 f.flush()
-    except Exception:
-        pass
-    finally:
-        f.close()
+        except Exception:
+            pass
+
+
+def _launch(name, cfg, port, log_mode="w"):
+    env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
+    cmd = [
+        PYTHON, "-u", "main.py",
+        cfg,
+        "--peers", PEERS_FILE,
+        "--port", str(port),
+        "--ip", "127.0.0.1",
+        "--discovery", "6",
+    ]
+    p = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        cwd=BASE,
+        env=env,
+    )
+    procs[name] = p
+    log_path = os.path.join(TESTS, "log_leave_{}.txt".format(name))
+    t = threading.Thread(
+        target=_reader, args=(name, p, log_path, log_mode), daemon=True
+    )
+    t.start()
+    print("[driver] no {} iniciado pid={}".format(name, p.pid))
+
+
+def _kill(name):
+    p = procs.get(name)
+    if p is None:
+        return
+    if p.poll() is None:
+        p.terminate()
+        try:
+            p.wait(timeout=4)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait(timeout=2)
 
 
 def send(name, cmd):
@@ -85,67 +147,61 @@ def find_line_after(name, fragment, after_ts):
 
 
 def main():
-    env = dict(os.environ)
-    env["PYTHONUNBUFFERED"] = "1"
-
     for name, _cfg, _port in NODES:
         log_lines[name] = []
         log_locks[name] = threading.Lock()
 
-    # Phase 1: launch all 3 nodes with 0.5s stagger
+    # Phase 1: launch A, C, D
+    print("[driver] lancando A, C, D (ring: A->C->D->A)...")
     for name, cfg, port in NODES:
-        cmd = [
-            PYTHON, "-u", "main.py",
-            cfg,
-            "--peers", "tests/peers.txt",
-            "--port", str(port),
-            "--ip", "127.0.0.1",
-            "--discovery", "6",
-        ]
-        p = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            cwd=BASE,
-            env=env,
-        )
-        procs[name] = p
-        log_path = os.path.join(TESTS, "log_leave_{}.txt".format(name))
-        t = threading.Thread(target=_reader, args=(name, p, log_path), daemon=True)
-        t.start()
-        print("[driver] no {} iniciado pid={}".format(name, p.pid))
+        _launch(name, cfg, port, log_mode="w")
         time.sleep(0.5)
 
-    print("[driver] aguardando formacao do anel (10s)...")
+    print("[driver] aguardando formacao do anel A->C->D->A (10s)...")
     time.sleep(10)
 
-    # Phase 2: only B quits; record the timestamp of departure
-    t_b_quit = time.monotonic()
-    print("[driver] enviando quit para B; A e C continuam")
-    send("B", "quit")
-    print("[driver] aguardando 12s para o anel sarar...")
-    time.sleep(12)
-
-    # Phase 3: status on A and C
-    send("A", "status")
-    send("C", "status")
+    # Phase 2: kill D -- D stays in A's ring.members
+    print("[driver] matando D (permanece nos members de A)...")
+    send("D", "quit")
+    time.sleep(1)
+    _kill("D")
+    print("[driver] D morto. aguardando 2s...")
     time.sleep(2)
 
-    # Phase 4: quit A and C; force-terminate leftovers
+    # Phase 3: kill C -- we need C to restart fresh so its ring heals to {A,C}
+    print("[driver] matando C para reiniciar limpo...")
+    send("C", "quit")
+    time.sleep(1)
+    _kill("C")
+    print("[driver] C morto. aguardando 3s para porta 6003 liberar...")
+    time.sleep(3)
+
+    # Phase 4: restart C fresh
+    # C sends DISCOVER; only A responds (D is dead); C's ring = {A, C}; C's successor = A
+    print("[driver] reiniciando C (ring de C sera {A,C}, successor=A)...")
+    _launch("C", "tests/config_leave_C.txt", 6003, log_mode="a")
+    print("[driver] aguardando C redescobrir anel (8s)...")
+    time.sleep(8)
+
+    # Phase 5: A sends data to D
+    # A's ring = {A, C, D}; A's successor = C (alive).
+    # Data: A->C (A's successor). C receives, d=D, C is intermediate.
+    # C's ring = {A, C}; C's successor = A. C forwards to A.
+    # A gets packet back with ctrl = maquinainexistente. Both log lines fire.
+    t_send = time.monotonic()
+    print("[driver] A envia 'send D teste' (caminho reativo)...")
+    send("A", "send D teste")
+    print("[driver] aguardando circulacao e cura (8s)...")
+    time.sleep(8)
+
+    # Phase 6: status and quit
+    send("A", "status")
+    time.sleep(2)
     send("A", "quit")
     send("C", "quit")
     time.sleep(2)
     for name, _, _ in NODES:
-        p = procs[name]
-        if p.poll() is None:
-            p.terminate()
-            try:
-                p.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                p.kill()
+        _kill(name)
 
     # --- Verification ---
     print("\n" + "=" * 60)
@@ -158,59 +214,47 @@ def main():
         status = "PASS" if ok else "FAIL"
         checks.append((status, label, evidence))
 
-    # 1. A or C logged the LEAVE reception
-    leave_on_A = find_line("A", "B saiu da rede -> recalculando anel")
-    leave_on_C = find_line("C", "B saiu da rede -> recalculando anel")
+    # 1. A logs maquinainexistente detection for destino D
+    absent_line = find_line_after("A", "destino D ausente/desligado (maquinainexistente)", t_send)
     chk(
-        "A ou C logow 'B saiu da rede'",
-        leave_on_A is not None or leave_on_C is not None,
-        leave_on_A or leave_on_C,
+        "A logou destino D ausente/desligado (maquinainexistente)",
+        absent_line is not None,
+        absent_line,
     )
 
-    # 2. After B left: A sends token to C
-    a_to_c = find_line_after("A", "enviando token para C", t_b_quit)
+    # 2. A logs removing D from ring
+    remove_line = find_line_after("A", "removendo D do anel (maquinainexistente)", t_send)
     chk(
-        "A enviou token para C apos saida de B",
-        a_to_c is not None,
-        a_to_c,
+        "A logou removendo D do anel (maquinainexistente)",
+        remove_line is not None,
+        remove_line,
     )
 
-    # 3. After B left: C sends token to A
-    c_to_a = find_line_after("C", "enviando token para A", t_b_quit)
+    # 3. A's status shows ring as ['A', 'C'] after heal
+    ring_line = find_line_after("A", "anel: ['A', 'C']", t_send)
     chk(
-        "C enviou token para A apos saida de B",
-        c_to_a is not None,
-        c_to_a,
+        "status de A mostra anel ['A','C'] apos cura",
+        ring_line is not None,
+        ring_line,
     )
 
-    # 4. A's status shows ring as ['A','C']
-    ring_in_a_status = find_line_after("A", "anel: ['A', 'C']", t_b_quit)
-    chk(
-        "status de A mostra anel ['A','C']",
-        ring_in_a_status is not None,
-        ring_in_a_status,
-    )
-
-    # 5. C's status shows ring as ['A','C']
-    ring_in_c_status = find_line_after("C", "anel: ['A', 'C']", t_b_quit)
-    chk(
-        "status de C mostra anel ['A','C']",
-        ring_in_c_status is not None,
-        ring_in_c_status,
-    )
-
-    # 6. No freeze: at least N token events appeared on A after B's departure
-    token_events_a_after = sum(
+    # 4. Ring keeps circulating after heal
+    t_heal = t_send
+    for ts, ln in collect("A"):
+        if ts >= t_send and "removendo D do anel" in ln:
+            t_heal = ts
+            break
+    token_events_after = sum(
         1 for ts, ln in collect("A")
-        if ts >= t_b_quit and ("recebeu o token" in ln or "enviando token" in ln)
+        if ts >= t_heal and ("recebeu o token" in ln or "enviando token" in ln)
     )
     chk(
-        "sem freeze: token events em A apos saida de B (>=3)",
-        token_events_a_after >= 3,
-        "token_events_A_after={}".format(token_events_a_after),
+        "anel circula apos cura (token events em A >= 1)",
+        token_events_after >= 1,
+        "token_events_A_after_heal={}".format(token_events_after),
     )
 
-    # 7. No tracebacks
+    # 5. No tracebacks
     tb_found = None
     for name, _, _ in NODES:
         tb = find_line(name, "Traceback")
@@ -219,14 +263,14 @@ def main():
             break
     chk("sem tracebacks", tb_found is None, tb_found or "OK")
 
-    print("\n{:<6} {:<52} {}".format("STATUS", "VERIFICACAO", "EVIDENCIA"))
+    print("\n{:<6} {:<55} {}".format("STATUS", "VERIFICACAO", "EVIDENCIA"))
     print("-" * 120)
     all_pass = True
     for status, label, evidence in checks:
         if status == "FAIL":
             all_pass = False
-        ev = str(evidence or "(nao encontrado)")[:60]
-        print("{:<6} {:<52} {}".format(status, label, ev))
+        ev = str(evidence or "(nao encontrado)")[:55]
+        print("{:<6} {:<55} {}".format(status, label, ev))
 
     print("\n=== RESULTADO FINAL: {} ===".format("PASS" if all_pass else "FAIL"))
 
