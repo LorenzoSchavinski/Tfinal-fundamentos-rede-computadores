@@ -28,6 +28,9 @@ python main.py config.txt
 Pronto. Os nodes se descobrem sozinhos por broadcast.
 
 no caso tu pode so uysar o config.example.txt e fodasse so troca a letrinha la 
+entao 
+
+python main.py config.example.txt
 
 ### Importante pra funcionar
 
