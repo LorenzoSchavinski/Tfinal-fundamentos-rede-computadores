@@ -4,6 +4,7 @@ Simula erros de transmissao corrompendo, com certa probabilidade, um byte da
 mensagem antes de envia-la. O receptor detecta a divergencia via CRC e responde
 com NAK, exercitando o mecanismo de retransmissao do anel.
 """
+
 from __future__ import annotations
 
 import random

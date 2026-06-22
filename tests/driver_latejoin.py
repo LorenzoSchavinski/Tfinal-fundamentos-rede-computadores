@@ -21,6 +21,7 @@ PASS criteria:
   - A status shows tokens_perdidos >= 1.
   - No traceback.
 """
+
 from __future__ import annotations
 
 import os
@@ -64,12 +65,18 @@ def _launch(name, cfg, port):
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     cmd = [
-        PYTHON, "-u", "main.py",
+        PYTHON,
+        "-u",
+        "main.py",
         cfg,
-        "--peers", "tests/peers.txt",
-        "--port", str(port),
-        "--ip", "127.0.0.1",
-        "--discovery", "6",
+        "--peers",
+        "tests/peers.txt",
+        "--port",
+        str(port),
+        "--ip",
+        "127.0.0.1",
+        "--discovery",
+        "6",
     ]
     p = subprocess.Popen(
         cmd,
@@ -195,7 +202,9 @@ def main():
         checks.append((status, label, evidence))
 
     # 1. B was controller before A joined (B's apelido < C's)
-    b_was_ctrl = find_line("B", "gerando token inicial") or find_line("B", "gerou/inseriu")
+    b_was_ctrl = find_line("B", "gerando token inicial") or find_line(
+        "B", "gerou/inseriu"
+    )
     chk(
         "B foi controladora inicial (gerou token)",
         b_was_ctrl is not None,

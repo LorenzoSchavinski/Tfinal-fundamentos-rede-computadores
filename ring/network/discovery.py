@@ -2,13 +2,14 @@
 
 O anel eh definido de forma deterministica a partir do conjunto de membros
 conhecidos. Cada membro eh identificado pelo apelido e guarda seu endereco
-(ip, porta). A ordem do anel eh a ordenacao por (apelido, ip): assim todas as
-maquinas, vendo o mesmo conjunto, calculam o MESMO sucessor para cada uma.
+(ip, porta). A ordem do anel eh alfabetica por apelido: assim todas as maquinas,
+vendo o mesmo conjunto, calculam o MESMO sucessor para cada uma.
 
 A controladora (responsavel por vigiar o token) eh, por convencao, a maquina de
 menor apelido. Como a ordem eh total e igual em todos os nos, a eleicao eh
 implicita: nao ha troca de mensagens para escolher quem controla.
 """
+
 from __future__ import annotations
 
 
@@ -42,14 +43,10 @@ class Ring:
         return dict(self._members)
 
     def order(self) -> list:
-        """Lista de (apelido, ip, porta) ordenada por (apelido, ip).
-
-        A ordenacao por apelido define o sentido do anel; o ip eh apenas
-        criterio de desempate determinístico caso dois apelidos coincidam.
-        """
+        """Lista de ``(apelido, ip, porta)`` em ordem alfabetica de apelido."""
         return sorted(
             ((ap, ip, port) for ap, (ip, port) in self._members.items()),
-            key=lambda e: (e[0], e[1]),
+            key=lambda membro: membro[0],
         )
 
     def successor(self, my_apelido):
@@ -77,5 +74,5 @@ class Ring:
         return self.controller_apelido() == my_apelido
 
     def remove(self, apelido) -> None:
-        """Remove um membro do anel, se presente (auxiliar)."""
+        """Remove um membro do conjunto ativo, se presente."""
         self._members.pop(apelido, None)

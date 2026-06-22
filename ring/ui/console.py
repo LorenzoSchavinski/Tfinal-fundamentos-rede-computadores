@@ -7,8 +7,10 @@ Varias threads (receptora, vigia do token, motor) imprimem ao mesmo tempo.
 eventos postados no barramento do no. O Console NUNCA toca no estado do no: so
 posta eventos; quem decide eh o motor (thread unica) do no.
 """
+
 from __future__ import annotations
 
+import sys
 import threading
 
 _print_lock = threading.Lock()
@@ -27,15 +29,15 @@ def log(msg) -> None:
         try:
             print(msg)
         except UnicodeEncodeError:
-            enc = getattr(__import__("sys").stdout, "encoding", "utf-8") or "utf-8"
+            enc = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
             print(msg.encode(enc, errors="replace").decode(enc, errors="replace"))
 
 
 _HELP = (
     "Comandos:\n"
     "  send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)\n"
-    "  gentoken | addtoken           gera/insere um token na rede\n"
-    "  removetoken | rmtoken         retira o token da rede\n"
+    "  gentoken | addtoken           insere um token adicional na rede\n"
+    "  removetoken | rmtoken         retira agora ou na proxima passagem\n"
     "  status                        mostra o estado atual do no\n"
     "  queue | fila                  lista a fila de mensagens\n"
     "  join | discover               reenvia DISCOVER (atualiza topologia)\n"

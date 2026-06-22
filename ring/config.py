@@ -9,7 +9,10 @@ Layout exato (uma informacao por linha):
 
 Os numeros podem usar virgula decimal (ex.: "2,5" = 2.5).
 """
+
 from __future__ import annotations
+
+import math
 
 
 class Config:
@@ -24,7 +27,9 @@ class Config:
         min_token_interval: float,
     ) -> None:
         self.apelido = apelido
-        self.token_time = token_time  # tempo segurando token / envio de dados
+        # Campo "tempo_token_e_dados" do arquivo; controla o ritmo de passagem
+        # do token quando a maquina nao esta transmitindo.
+        self.token_time = token_time
         self.error_prob = error_prob  # probabilidade de erro (percentual)
         self.token_timeout = token_timeout  # tempo ate considerar token perdido
         self.min_token_interval = min_token_interval  # intervalo minimo entre tokens
@@ -68,26 +73,58 @@ def _from_lines(linhas: list) -> Config:
             "Arquivo de configuracao invalido: esperadas 5 linhas nao vazias, "
             "encontradas {}.".format(len(uteis))
         )
+    apelido = uteis[0].strip().upper()
+    token_time = _to_float(uteis[1])
+    error_prob = _to_float(uteis[2])
+    token_timeout = _to_float(uteis[3])
+    min_token_interval = _to_float(uteis[4])
+
+    if not apelido or ":" in apelido:
+        raise ValueError("Apelido invalido: use texto nao vazio e sem ':'.")
+    try:
+        apelido.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError("Apelido invalido: use apenas caracteres ASCII.") from exc
+    valores = (token_time, error_prob, token_timeout, min_token_interval)
+    if not all(math.isfinite(valor) for valor in valores):
+        raise ValueError("Os valores numericos devem ser finitos.")
+    if token_time <= 0:
+        raise ValueError("tempo_token_e_dados deve ser maior que zero.")
+    if not 0 <= error_prob <= 100:
+        raise ValueError("probabilidade de erro deve estar entre 0 e 100.")
+    if token_timeout <= 0:
+        raise ValueError("timeout do token deve ser maior que zero.")
+    if min_token_interval < 0:
+        raise ValueError("tempo minimo entre tokens nao pode ser negativo.")
+
     return Config(
-        apelido=uteis[0].strip().upper(),
-        token_time=_to_float(uteis[1]),
-        error_prob=_to_float(uteis[2]),
-        token_timeout=_to_float(uteis[3]),
-        min_token_interval=_to_float(uteis[4]),
+        apelido=apelido,
+        token_time=token_time,
+        error_prob=error_prob,
+        token_timeout=token_timeout,
+        min_token_interval=min_token_interval,
     )
 
 
 def load(path: str) -> Config:
     """Le o arquivo em ``path`` e devolve um ``Config``.
 
-    Usa as 5 primeiras linhas nao vazias; levanta ``ValueError`` se houver menos
-    de 5. A linha 0 eh o apelido; as linhas 1 a 4 sao floats via ``_to_float``.
+    Usa as 5 primeiras linhas nao vazias e valida apelido, faixas e tempos antes
+    de abrir qualquer socket.
     """
     with open(path, "r", encoding="utf-8") as f:
         return _from_lines(f.readlines())
 
 
 if __name__ == "__main__":
+
+    def deve_falhar(linhas) -> None:
+        try:
+            _from_lines(linhas)
+        except ValueError:
+            return
+        raise AssertionError("configuracao invalida foi aceita: {!r}".format(linhas))
+
     # Auto-teste com exemplo em memoria "B/2/20/2,5/2" (uma linha por campo).
     exemplo = ["B", "2", "20", "2,5", "2"]
     cfg = _from_lines(exemplo)
@@ -106,6 +143,18 @@ if __name__ == "__main__":
         raise AssertionError("deveria ter levantado ValueError")
     except ValueError:
         pass
+
+    # Faixas e apelidos invalidos devem falhar antes de abrir a rede.
+    invalidos = [
+        ["", "1", "0", "10", "1"],
+        ["A:B", "1", "0", "10", "1"],
+        ["A", "0", "0", "10", "1"],
+        ["A", "1", "101", "10", "1"],
+        ["A", "1", "0", "-1", "1"],
+        ["A", "1", "0", "10", "-1"],
+    ]
+    for invalido in invalidos:
+        deve_falhar(invalido)
 
     print(cfg)
     print("config.py: auto-teste OK")

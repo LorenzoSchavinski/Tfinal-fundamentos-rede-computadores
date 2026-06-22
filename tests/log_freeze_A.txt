@@ -12,19 +12,17 @@ Comandos:
   join | discover               reenvia DISCOVER (atualiza topologia)
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
-[A] DISCOVER de B, respondendo HELLO
-[A] DISCOVER de B, respondendo HELLO
-[A] DISCOVER de C, respondendo HELLO
-[A] DISCOVER de C, respondendo HELLO
+[A] DISCOVER de B (entrou no anel), respondendo HELLO
+[A] DISCOVER de C (entrou no anel), respondendo HELLO
 [A] sou a primeira maquina (menor apelido) e nenhum token observado -> gerando token inicial
 [A] gerou/inseriu um token na rede
 [A] recebeu o token
 [A] enviando token para B
-[A] recebeu o token
 [A] msg para B enfileirada (1/10)
+[A] recebeu o token
 [A] enviando DADOS para B (corrompido=True): "abc"
-[wire TX -> 127.0.0.1:6002] 2000:A:B:maquinainexistente:891568578:abw
-[wire RX <- 127.0.0.1:6003] 2000:A:B:NAK:891568578:abw
+[wire TX -> 127.0.0.1:6002] 2000:A:B:maquinainexistente:891568578:a?c
+[wire RX <- 127.0.0.1:6003] 2000:A:B:NAK:891568578:a?c
 [A] RETRANSMISSAO: NAK recebido de B, reenviando msg correta na proxima passagem do token
 [A] enviando token para B
 [A] recebeu o token
@@ -35,29 +33,46 @@ Comandos:
 [A] enviando token para B
 [A] recebeu o token
 [A] enviando token para B
-[A] TOKEN DUPLICADO detectado (intervalo < minimo) -> removido da rede
-[A] TOKEN DUPLICADO detectado (intervalo < minimo) -> removido da rede
+[A] recebeu o token
+[A] enviando token para B
 [A] msg para B enfileirada (1/10)
-[A] TOKEN PERDIDO detectado (timeout) -> gerando novo token
-[A] gerou/inseriu um token na rede
 [A] recebeu o token
 [A] enviando DADOS para B (corrompido=True): "1234"
-[wire TX -> 127.0.0.1:6002] 2000:A:B:maquinainexistente:2615402659:?234
-[wire RX <- 127.0.0.1:6003] 2000:A:B:NAK:2615402659:?234
+[wire TX -> 127.0.0.1:6002] 2000:A:B:maquinainexistente:2615402659:123?
+[wire RX <- 127.0.0.1:6003] 2000:A:B:NAK:2615402659:123?
 [A] RETRANSMISSAO: NAK recebido de B, reenviando msg correta na proxima passagem do token
 [A] enviando token para B
-[A] msg para C enfileirada (2/10)
 [A] recebeu o token
 [A] enviando DADOS para B (corrompido=False): "1234"
 [wire TX -> 127.0.0.1:6002] 2000:A:B:maquinainexistente:2615402659:1234
 [wire RX <- 127.0.0.1:6003] 2000:A:B:ACK:2615402659:1234
 [A] mensagem entregue com sucesso (ACK)
 [A] enviando token para B
-[A] DISCOVER de B, respondendo HELLO
+[A] recebeu o token
+[A] enviando token para B
+[A] recebeu o token
+[A] enviando token para B
+[A] msg para C enfileirada (1/10)
+[A] recebeu o token
+[A] enviando DADOS para C (corrompido=True): "hello"
+[wire TX -> 127.0.0.1:6002] 2000:A:C:maquinainexistente:907060870:h3llo
+[wire RX <- 127.0.0.1:6003] 2000:A:C:NAK:907060870:h3llo
+[A] RETRANSMISSAO: NAK recebido de C, reenviando msg correta na proxima passagem do token
+[A] enviando token para B
+[A] recebeu o token
+[A] enviando DADOS para C (corrompido=False): "hello"
+[wire TX -> 127.0.0.1:6002] 2000:A:C:maquinainexistente:907060870:hello
+[wire RX <- 127.0.0.1:6003] 2000:A:C:ACK:907060870:hello
+[A] mensagem entregue com sucesso (ACK)
+[A] enviando token para B
+[A] recebeu o token
+[A] enviando token para B
+[A] recebeu o token
 [A] STATUS
   endereco: 127.0.0.1:6001  modo: local
-  controladora: True  com_token: False  aguardando_retorno: False
+  controladora: True  com_token: True  aguardando_retorno: False
+  retirada_token_pendente: False
   anel: ['A', 'B', 'C']
-  sucessor: B  fila: 1  primeiro_token_gerado: True
-  tokens_perdidos: 1  tokens_duplicados: 2
-[A] DISCOVER de C, respondendo HELLO
+  sucessor: B  fila: 0  primeiro_token_gerado: True
+  tokens_perdidos: 0  tokens_duplicados: 0
+[A] enviando token para B

@@ -7,8 +7,8 @@ peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
 No 'A' pronto. Digite 'help' para os comandos.
 Comandos:
   send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
-  gentoken | addtoken           gera/insere um token na rede
-  removetoken | rmtoken         retira o token da rede
+  gentoken | addtoken           insere um token adicional na rede
+  removetoken | rmtoken         retira agora ou na proxima passagem
   status                        mostra o estado atual do no
   queue | fila                  lista a fila de mensagens
   join | discover               reenvia DISCOVER (atualiza topologia)
@@ -20,16 +20,13 @@ Comandos:
 [A] enviando token para B
 [A] recebeu o token
 [A] enviando token para B
-[A] nao estou com o token no momento (nada a retirar)
+[A] retirada agendada: o proximo token recebido sera removido
 [A] TOKEN PERDIDO detectado (timeout) -> gerando novo token
 [A] gerou/inseriu um token na rede
-[A] recebeu o token
-[A] enviando token para B
-[A] recebeu o token
 [A] STATUS
   endereco: 127.0.0.1:6001  modo: local
-  controladora: True  com_token: True  aguardando_retorno: False
+  controladora: True  com_token: False  aguardando_retorno: False
+  retirada_token_pendente: True
   anel: ['A', 'B', 'C']
   sucessor: B  fila: 0  primeiro_token_gerado: True
   tokens_perdidos: 1  tokens_duplicados: 0
-[A] enviando token para B

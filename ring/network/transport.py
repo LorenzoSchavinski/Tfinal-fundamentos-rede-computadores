@@ -10,6 +10,7 @@ Encapsula um unico socket UDP e uma thread receptora. Dois modos de operacao:
 Nada aqui interpreta o conteudo dos datagramas: isso eh papel da camada de
 protocolo. Aqui so trafegam bytes crus.
 """
+
 from __future__ import annotations
 
 import socket
@@ -44,7 +45,9 @@ def detect_ip() -> str:
 class Transport:
     """Wrapper de socket UDP com thread receptora e broadcast por modo."""
 
-    def __init__(self, bind_ip, bind_port, mode, broadcast_targets, on_datagram) -> None:
+    def __init__(
+        self, bind_ip, bind_port, mode, broadcast_targets, on_datagram
+    ) -> None:
         # mode: "lan" ou "local". on_datagram: callback(data: bytes, addr: (ip, porta)).
         # broadcast_targets so eh usado no modo "local" para simular difusao.
         self.bind_ip = bind_ip
@@ -53,12 +56,11 @@ class Transport:
         self.broadcast_targets = list(broadcast_targets or [])
         self.on_datagram = on_datagram
 
-        self._stop = False
+        self._stop = threading.Event()
         self._thread = None
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Reuso do endereco: permite religar rapidamente e, no modo local, varias
-        # instancias coexistirem em portas distintas sem reclamar de TIME_WAIT.
+        # Permite reiniciar rapidamente a aplicacao na mesma porta UDP.
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if mode == "lan":
             # Necessario para poder enviar a 255.255.255.255.
@@ -75,9 +77,11 @@ class Transport:
         # fecha o socket, recvfrom levanta OSError e o laco encerra limpo.
         # WinError 10054 (ICMP port-unreachable refletido de envio a porta
         # inexistente) eh ignorado: o laco continua sem encerrar o receptor.
-        while not self._stop:
+        while not self._stop.is_set():
             try:
-                data, addr = self.sock.recvfrom(2048)
+                # Buffer para um datagrama UDP completo. Evita truncar mensagens
+                # maiores e transforma-las artificialmente em erro de CRC.
+                data, addr = self.sock.recvfrom(65535)
             except OSError as exc:
                 winerr = getattr(exc, "winerror", None)
                 if winerr == _WINERROR_CONNECTION_RESET:
@@ -88,7 +92,11 @@ class Transport:
                 try:
                     self.on_datagram(data, addr)
                 except Exception:
-                    log("[transport] erro ao tratar datagrama de {}: {}".format(addr, traceback.format_exc()))
+                    log(
+                        "[transport] erro ao tratar datagrama de {}: {}".format(
+                            addr, traceback.format_exc()
+                        )
+                    )
 
     def _sendto(self, data: bytes, addr) -> bool:
         """Envia ``data`` a ``addr`` tolerando falha: loga e retorna False em erro."""
@@ -112,13 +120,19 @@ class Transport:
         """Envia ``data`` para um endereco unico (ip, porta)."""
         # Evidencia de fio: registra apenas pacotes DATA (prefixo "2000") enviados.
         if data[:4] == b"2000":
-            log("[wire TX -> {}:{}] {}".format(ip, port, data.decode("utf-8", errors="replace")))
+            log(
+                "[wire TX -> {}:{}] {}".format(
+                    ip, port, data.decode("utf-8", errors="replace")
+                )
+            )
         return self._sendto(data, (ip, port))
 
     def close(self) -> None:
         """Sinaliza parada e fecha o socket (desbloqueia o recvfrom)."""
-        self._stop = True
+        self._stop.set()
         try:
             self.sock.close()
         except OSError:
             pass
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=1)

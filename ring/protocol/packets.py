@@ -12,11 +12,12 @@ Regras gerais do formato:
     divisoes (maxsplit) para nunca quebrar a mensagem.
 
 Tipos de pacote (prefixo numerico antes do primeiro ':'):
-  10   -> DISCOVER  (anuncio de entrada na rede)
+  10   -> DISCOVER  (descoberta ou confirmacao de presenca)
   20   -> HELLO     (resposta de presenca)
   1000 -> TOKEN     (o bastao que circula no anel; nao tem ':')
   2000 -> DATA      (mensagem de dados com origem, destino, controle e CRC)
 """
+
 from __future__ import annotations
 
 # --- Prefixos de tipo (string, pois vao em ASCII no fio) ---------------------
@@ -25,7 +26,7 @@ P_HELLO = "20"
 P_TOKEN = "1000"
 P_DATA = "2000"
 
-# Destino especial usado em anuncios.
+# Destino especial dos pacotes DATA enviados a todo o anel.
 BROADCAST = "BROADCAST"
 
 # --- Valores do campo de controle de DATA ------------------------------------
@@ -44,12 +45,24 @@ _SEP = b":"
 # =============================================================================
 def build_discover(apelido: str, ip: str) -> bytes:
     """Monta ``b"10:<apelido>:<ip>"``."""
-    return P_DISCOVER.encode("ascii") + _SEP + apelido.encode("ascii") + _SEP + ip.encode("ascii")
+    return (
+        P_DISCOVER.encode("ascii")
+        + _SEP
+        + apelido.encode("ascii")
+        + _SEP
+        + ip.encode("ascii")
+    )
 
 
 def build_hello(apelido: str, ip: str) -> bytes:
     """Monta ``b"20:<apelido>:<ip>"``."""
-    return P_HELLO.encode("ascii") + _SEP + apelido.encode("ascii") + _SEP + ip.encode("ascii")
+    return (
+        P_HELLO.encode("ascii")
+        + _SEP
+        + apelido.encode("ascii")
+        + _SEP
+        + ip.encode("ascii")
+    )
 
 
 def build_token() -> bytes:
@@ -57,7 +70,9 @@ def build_token() -> bytes:
     return P_TOKEN.encode("ascii")
 
 
-def build_data(origem: str, destino: str, controle: str, crc: str, message: bytes) -> bytes:
+def build_data(
+    origem: str, destino: str, controle: str, crc: str, message: bytes
+) -> bytes:
     """Monta ``b"2000:<origem>:<destino>:<controle>:<crc>:" + message``.
 
     A ``message`` (bytes) eh anexada literalmente, sem nenhuma transformacao,
@@ -124,7 +139,7 @@ def parse(datagram: bytes) -> dict:
         return {"type": "UNKNOWN", "raw": datagram}
     prefixo = prefixo.decode("ascii", errors="replace")
 
-    if prefixo == P_DISCOVER or prefixo == P_HELLO:
+    if prefixo in (P_DISCOVER, P_HELLO):
         # "10:<apelido>:<ip>" -> 3 partes (mesmo formato para DISCOVER/HELLO).
         partes = datagram.split(_SEP, 2)
         if len(partes) < 3:

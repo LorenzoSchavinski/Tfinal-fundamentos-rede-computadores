@@ -2,6 +2,7 @@
 apelido: B | modo: local | endereco anunciado: 127.0.0.1:6002
 Config: apelido=B | token_time=1.0s | error_prob=0.0% | token_timeout=10.0s | min_token_interval=2.0s
 peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
+[B] HELLO de A (entrou no anel)
 No 'B' pronto. Digite 'help' para os comandos.
 Comandos:
   send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
@@ -12,14 +13,59 @@ Comandos:
   join | discover               reenvia DISCOVER (atualiza topologia)
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
-[B] sou a primeira maquina (menor apelido) e nenhum token observado -> gerando token inicial
-[B] gerou/inseriu um token na rede
-[B] DISCOVER de A, respondendo HELLO
-[B] HELLO de C (entrou no anel)
+[B] DISCOVER de C (entrou no anel), respondendo HELLO
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[wire RX <- 127.0.0.1:6001] 2000:A:B:maquinainexistente:891568578:a?c
+[B] CRC NAO confere de A (recebido=891568578 calculado=1256277602) -> NAK
+[B] DADOS de A: "a?c" -> NAK
+[wire TX -> 127.0.0.1:6003] 2000:A:B:NAK:891568578:a?c
+[B] recebeu o token
+[B] enviando token para C
+[wire RX <- 127.0.0.1:6001] 2000:A:B:maquinainexistente:891568578:abc
+[B] DADOS de A: "abc" -> ACK
+[wire TX -> 127.0.0.1:6003] 2000:A:B:ACK:891568578:abc
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[wire RX <- 127.0.0.1:6001] 2000:A:B:maquinainexistente:2615402659:123?
+[B] CRC NAO confere de A (recebido=2615402659 calculado=8856083) -> NAK
+[B] DADOS de A: "123?" -> NAK
+[wire TX -> 127.0.0.1:6003] 2000:A:B:NAK:2615402659:123?
+[B] recebeu o token
+[B] enviando token para C
+[wire RX <- 127.0.0.1:6001] 2000:A:B:maquinainexistente:2615402659:1234
+[B] DADOS de A: "1234" -> ACK
+[wire TX -> 127.0.0.1:6003] 2000:A:B:ACK:2615402659:1234
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
+[wire RX <- 127.0.0.1:6001] 2000:A:C:maquinainexistente:907060870:h3llo
+[B] repassando DADOS de A para C
+[wire TX -> 127.0.0.1:6003] 2000:A:C:maquinainexistente:907060870:h3llo
+[B] recebeu o token
+[B] enviando token para C
+[wire RX <- 127.0.0.1:6001] 2000:A:C:maquinainexistente:907060870:hello
+[B] repassando DADOS de A para C
+[wire TX -> 127.0.0.1:6003] 2000:A:C:maquinainexistente:907060870:hello
+[B] recebeu o token
+[B] enviando token para C
+[B] recebeu o token
+[B] enviando token para C
 [B] STATUS
   endereco: 127.0.0.1:6002  modo: local
   controladora: False  com_token: False  aguardando_retorno: False
+  retirada_token_pendente: False
   anel: ['A', 'B', 'C']
-  sucessor: C  fila: 0  primeiro_token_gerado: True
+  sucessor: C  fila: 0  primeiro_token_gerado: False
   tokens_perdidos: 0  tokens_duplicados: 0
-[B] DISCOVER de C, respondendo HELLO
+[B] recebeu o token
+[B] enviando token para C

@@ -1,65 +1,43 @@
 === Anel de Tokens (UDP) ===
 apelido: C | modo: local | endereco anunciado: 127.0.0.1:6003
 Config: apelido=C | token_time=1.0s | error_prob=0.0% | token_timeout=8.0s | min_token_interval=2.0s
-peers: {'A': '127.0.0.1:6001', 'C': '127.0.0.1:6003', 'D': '127.0.0.1:6004'}
+peers: {'A': '127.0.0.1:6001', 'B': '127.0.0.1:6002', 'C': '127.0.0.1:6003'}
+[C] HELLO de A (entrou no anel)
 No 'C' pronto. Digite 'help' para os comandos.
 Comandos:
   send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
-  gentoken | addtoken           gera/insere um token na rede
-  removetoken | rmtoken         retira o token da rede
+  gentoken | addtoken           insere um token adicional na rede
+  removetoken | rmtoken         retira agora ou na proxima passagem
   status                        mostra o estado atual do no
   queue | fila                  lista a fila de mensagens
   join | discover               reenvia DISCOVER (atualiza topologia)
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
-[C] HELLO de A (entrou no anel)
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de A, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] DISCOVER de D, respondendo HELLO
-[C] recebeu o token
-[C] enviando token para D
-[C] recebeu o token
-[C] enviando token para D
-=== Anel de Tokens (UDP) ===
-apelido: C | modo: local | endereco anunciado: 127.0.0.1:6003
-Config: apelido=C | token_time=1.0s | error_prob=0.0% | token_timeout=8.0s | min_token_interval=2.0s
-peers: {'A': '127.0.0.1:6001', 'C': '127.0.0.1:6003', 'D': '127.0.0.1:6004'}
-[C] HELLO de A (entrou no anel)
-No 'C' pronto. Digite 'help' para os comandos.
-Comandos:
-  send <destino> <mensagem...>  envia mensagem (destino = apelido ou BROADCAST)
-  gentoken | addtoken           gera/insere um token na rede
-  removetoken | rmtoken         retira o token da rede
-  status                        mostra o estado atual do no
-  queue | fila                  lista a fila de mensagens
-  join | discover               reenvia DISCOVER (atualiza topologia)
-  help | ?                      mostra esta ajuda
-  quit | exit | sair            encerra
-[C] recebeu o token
-[C] enviando token para A
-[wire RX <- 127.0.0.1:6001] 2000:A:D:maquinainexistente:3870574863:teste
-[C] repassando DADOS de A para D
-[wire TX -> 127.0.0.1:6001] 2000:A:D:maquinainexistente:3870574863:teste
+[C] HELLO de B (entrou no anel)
 [C] recebeu o token
 [C] enviando token para A
 [C] recebeu o token
+[C] enviando token para A
+[C] removendo B do anel (sem DISCOVER/HELLO ha 6.0s)
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6001] 2000:A:C:maquinainexistente:62893855:apos-saida
+[C] DADOS de A: "apos-saida" -> ACK
+[wire TX -> 127.0.0.1:6001] 2000:A:C:ACK:62893855:apos-saida
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] STATUS
+  endereco: 127.0.0.1:6003  modo: local
+  controladora: False  com_token: False  aguardando_retorno: False
+  retirada_token_pendente: False
+  anel: ['A', 'C']
+  sucessor: A  fila: 0  primeiro_token_gerado: False
+  tokens_perdidos: 0  tokens_duplicados: 0
+[C] recebeu o token
+[C] enviando token para A

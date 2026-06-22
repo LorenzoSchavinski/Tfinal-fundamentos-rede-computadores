@@ -1,4 +1,5 @@
 """Harness de teste: sobe 3 nos do anel e valida o comportamento esperado."""
+
 from __future__ import annotations
 
 import os
@@ -84,12 +85,18 @@ def main():
     # --discovery 6 da margem para os 3 processos subirem antes da eleicao.
     for name, cfg, port in NODES:
         cmd = [
-            PYTHON, "-u", "main.py",
+            PYTHON,
+            "-u",
+            "main.py",
             cfg,
-            "--peers", "tests/peers.txt",
-            "--port", str(port),
-            "--ip", "127.0.0.1",
-            "--discovery", "6",
+            "--peers",
+            "tests/peers.txt",
+            "--port",
+            str(port),
+            "--ip",
+            "127.0.0.1",
+            "--discovery",
+            "6",
         ]
         p = subprocess.Popen(
             cmd,
@@ -128,13 +135,9 @@ def main():
     send("C", "send BROADCAST Ola galera")
     time.sleep(8)
 
-    # 5) Remove token em todos (token perdido -> A regenera apos timeout de 10s)
-    print("[driver] removendo token em todos os nos...")
-    send("A", "removetoken")
-    time.sleep(0.5)
+    # 5) B solicita a retirada do proximo token; A regenera apos o timeout.
+    print("[driver] B solicitando retirada do proximo token...")
     send("B", "removetoken")
-    time.sleep(0.5)
-    send("C", "removetoken")
     time.sleep(12)
 
     # 6) Status em todos
@@ -159,9 +162,9 @@ def main():
             p.wait(timeout=3)
 
     # --- Dump dos logs ---
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("DUMP DOS LOGS")
-    print("="*60)
+    print("=" * 60)
     for name, _, _ in NODES:
         lines = collect(name)
         print("\n--- log_{}.txt ({} linhas) ---".format(name, len(lines)))
@@ -171,9 +174,9 @@ def main():
             print()
 
     # --- Verificacao dos marcadores esperados ---
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("VERIFICACAO")
-    print("="*60)
+    print("=" * 60)
 
     checks = []
 
@@ -183,44 +186,56 @@ def main():
         checks.append((status, label, line))
 
     # a) Formacao do anel
-    chk("(a1) DISCOVER/HELLO trocados",
-        find_line("A", "DISCOVER de ") or find_line("A", "HELLO de "))
-    chk("(a2) anel com 3 membros em A",
-        find_line("A", "anel: ['A', 'B', 'C']"))
+    chk(
+        "(a1) DISCOVER/HELLO trocados",
+        find_line("A", "DISCOVER de ") or find_line("A", "HELLO de "),
+    )
+    chk("(a2) anel com 3 membros em A", find_line("A", "anel: ['A', 'B', 'C']"))
 
     # b) Primeiro token
-    chk("(b1) A gerou token inicial",
-        find_line("A", "gerando token inicial") or find_line("A", "gerou/inseriu"))
-    chk("(b2) algum no recebeu o token",
-        find_line("A", "recebeu o token") or find_line("B", "recebeu o token") or find_line("C", "recebeu o token"))
-    chk("(b3) token circulou (enviando token para)",
-        find_line("A", "enviando token para") or find_line("B", "enviando token para"))
+    chk(
+        "(b1) A gerou token inicial",
+        find_line("A", "gerando token inicial") or find_line("A", "gerou/inseriu"),
+    )
+    chk(
+        "(b2) algum no recebeu o token",
+        find_line("A", "recebeu o token")
+        or find_line("B", "recebeu o token")
+        or find_line("C", "recebeu o token"),
+    )
+    chk(
+        "(b3) token circulou (enviando token para)",
+        find_line("A", "enviando token para") or find_line("B", "enviando token para"),
+    )
 
     # c) Unicast ACK: B->A
-    chk("(c1) A recebeu DADOS de B",
-        find_line("A", "DADOS de B"))
-    chk("(c2) B confirmou entrega com ACK",
-        find_line("B", "entregue com sucesso (ACK)") or find_line("B", "ACK"))
+    chk("(c1) A recebeu DADOS de B", find_line("A", "DADOS de B"))
+    chk(
+        "(c2) B confirmou entrega com ACK",
+        find_line("B", "entregue com sucesso (ACK)") or find_line("B", "ACK"),
+    )
 
     # d) NAK + retransmissao: A->C
-    chk("(d1) C recebeu CRC errado / NAK",
-        find_line("C", "NAK") or find_line("C", "CRC NAO confere"))
-    chk("(d2) A logou RETRANSMISSAO",
-        find_line("A", "RETRANSMISSAO"))
-    chk("(d3) A confirmou ACK apos retransmissao",
-        find_line("A", "entregue com sucesso (ACK)"))
+    chk(
+        "(d1) C recebeu CRC errado / NAK",
+        find_line("C", "NAK") or find_line("C", "CRC NAO confere"),
+    )
+    chk("(d2) A logou RETRANSMISSAO", find_line("A", "RETRANSMISSAO"))
+    chk(
+        "(d3) A confirmou ACK apos retransmissao",
+        find_line("A", "entregue com sucesso (ACK)"),
+    )
 
     # e) Broadcast
-    chk("(e1) A recebeu BROADCAST de C",
-        find_line("A", "BROADCAST de C"))
-    chk("(e2) B recebeu BROADCAST de C",
-        find_line("B", "BROADCAST de C"))
-    chk("(e3) C broadcast concluido",
-        find_line("C", "broadcast concluido") or find_line("C", "BROADCAST concluido"))
+    chk("(e1) A recebeu BROADCAST de C", find_line("A", "BROADCAST de C"))
+    chk("(e2) B recebeu BROADCAST de C", find_line("B", "BROADCAST de C"))
+    chk(
+        "(e3) C broadcast concluido",
+        find_line("C", "broadcast concluido") or find_line("C", "BROADCAST concluido"),
+    )
 
     # f) Recuperacao de token perdido
-    chk("(f1) A detectou TOKEN PERDIDO e regenerou",
-        find_line("A", "TOKEN PERDIDO"))
+    chk("(f1) A detectou TOKEN PERDIDO e regenerou", find_line("A", "TOKEN PERDIDO"))
 
     # g) Sem tracebacks
     tb_found = None
@@ -232,7 +247,7 @@ def main():
     chk("(g) sem tracebacks em nenhum log", None if tb_found else "OK - sem tracebacks")
 
     print("\n{:<6} {:<35} {}".format("STATUS", "VERIFICACAO", "EVIDENCIA"))
-    print("-"*90)
+    print("-" * 90)
     all_pass = True
     for status, label, evidence in checks:
         if status == "FAIL":
@@ -240,7 +255,14 @@ def main():
         ev = (evidence or "")[:60] if evidence else "(nao encontrado)"
         print("{:<6} {:<35} {}".format(status, label, ev))
 
-    print("\n" + ("=== RESULTADO FINAL: PASS ===" if all_pass else "=== RESULTADO FINAL: FAIL (veja tabela acima) ==="))
+    print(
+        "\n"
+        + (
+            "=== RESULTADO FINAL: PASS ==="
+            if all_pass
+            else "=== RESULTADO FINAL: FAIL (veja tabela acima) ==="
+        )
+    )
 
 
 if __name__ == "__main__":

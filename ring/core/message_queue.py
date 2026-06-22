@@ -1,8 +1,9 @@
 """Fila de mensagens por maquina (FIFO, ate 10 itens).
 
 Cada item guarda o apelido de destino e a mensagem. A maquina so transmite
-quando esta de posse do token, retirando o item da cabeca da fila.
+quando esta de posse do token; o item sai da fila depois do retorno do DATA.
 """
+
 from __future__ import annotations
 
 
@@ -14,12 +15,18 @@ class QueueItem:
         self.message_str = message_str  # forma textual, para exibicao
         self.message_bytes = message_str.encode("utf-8")  # forma enviada na rede
         # Flags de acompanhamento ao longo da volta no anel:
-        self.no_error = False  # destino confirmou recebimento sem erro (ACK)
+        self.skip_fault_injection = False  # retransmissao deve sair sem erro simulado
         self.retransmit_used = False  # ja houve uma retransmissao deste item
 
     def __repr__(self) -> str:
-        return "QueueItem(destino={!r}, message_str={!r}, no_error={}, retransmit_used={})".format(
-            self.destino, self.message_str, self.no_error, self.retransmit_used
+        return (
+            "QueueItem(destino={!r}, message_str={!r}, "
+            "skip_fault_injection={}, retransmit_used={})"
+        ).format(
+            self.destino,
+            self.message_str,
+            self.skip_fault_injection,
+            self.retransmit_used,
         )
 
 
@@ -86,7 +93,7 @@ if __name__ == "__main__":
     # Flags nascem False.
     cabeca = q.peek()
     assert cabeca is not None
-    assert cabeca.no_error is False
+    assert cabeca.skip_fault_injection is False
     assert cabeca.retransmit_used is False
     assert cabeca.message_bytes == b"msg0"
 

@@ -7,6 +7,7 @@ threads are not lost. Logs go to tests/log_freeze_A/B/C.txt.
 Run from the base directory:
     python -u tests/driver_freeze.py
 """
+
 from __future__ import annotations
 
 import os
@@ -113,7 +114,7 @@ def find_any_traceback():
                     # grab up to 20 lines of context
                     start = max(0, i)
                     end = min(len(lines), i + 25)
-                    block = [l.rstrip() for _, l in lines[start:end]]
+                    block = [line.rstrip() for _, line in lines[start:end]]
                     return name, block
     return None, None
 
@@ -134,12 +135,18 @@ def launch_nodes():
 
     for name, cfg, port in NODES:
         cmd = [
-            PYTHON, "-u", "main.py",
+            PYTHON,
+            "-u",
+            "main.py",
             cfg,
-            "--peers", "tests/peers.txt",
-            "--port", str(port),
-            "--ip", "127.0.0.1",
-            "--discovery", "6",
+            "--peers",
+            "tests/peers.txt",
+            "--port",
+            str(port),
+            "--ip",
+            "127.0.0.1",
+            "--discovery",
+            "6",
         ]
         p = subprocess.Popen(
             cmd,
@@ -188,12 +195,12 @@ def run_once(run_index=1):
     print("[driver] token lines antes msg1: {}".format(token_before_msg1))
 
     # -- Phase 2: msg1 -- A->B "abc", error_prob=100 => corrupted -> NAK -> retransmit -> ACK
-    t_msg1 = time.monotonic()
-    print("[driver] enviando msg1: A -> B 'abc' (esperado: corrupcao -> NAK -> RETRANSMISSAO -> ACK)")
+    print(
+        "[driver] enviando msg1: A -> B 'abc' (esperado: corrupcao -> NAK -> RETRANSMISSAO -> ACK)"
+    )
     send("A", "send B abc")
     time.sleep(10)
 
-    t_after_msg1 = time.monotonic()
     token_after_msg1 = {n: count_token_lines(n) for n, _, _ in NODES}
     print("[driver] token lines apos msg1: {}".format(token_after_msg1))
 
@@ -208,18 +215,20 @@ def run_once(run_index=1):
     print("[driver] token lines apos msg2: {}".format(token_after_msg2))
 
     # Check if freeze already happened
-    new_tokens_msg2 = {n: token_after_msg2[n] - token_after_msg1[n] for n, _, _ in NODES}
+    new_tokens_msg2 = {
+        n: token_after_msg2[n] - token_after_msg1[n] for n, _, _ in NODES
+    }
     print("[driver] novos token-events durante msg2: {}".format(new_tokens_msg2))
 
     # -- Phase 4: msg3 -- extra probe
-    t_msg3 = time.monotonic()
     print("[driver] enviando msg3: A -> C 'hello'")
     send("A", "send C hello")
     time.sleep(8)
 
-    t_after_msg3 = time.monotonic()
     token_after_msg3 = {n: count_token_lines(n) for n, _, _ in NODES}
-    new_tokens_msg3 = {n: token_after_msg3[n] - token_after_msg2[n] for n, _, _ in NODES}
+    new_tokens_msg3 = {
+        n: token_after_msg3[n] - token_after_msg2[n] for n, _, _ in NODES
+    }
     print("[driver] novos token-events durante msg3: {}".format(new_tokens_msg3))
 
     # -- Phase 5: status
@@ -239,9 +248,12 @@ def run_once(run_index=1):
     # Freeze detection: did tokens STOP after msg2?
     total_new_after_msg2 = sum(new_tokens_msg2.values())
     total_new_after_msg3 = sum(new_tokens_msg3.values())
-    freeze_detected = (total_new_after_msg2 == 0 and total_new_after_msg3 == 0)
-    print("\n[FREEZE] novos token-events apos msg2={}, apos msg3={}  =>  FREEZE={}".format(
-        total_new_after_msg2, total_new_after_msg3, freeze_detected))
+    freeze_detected = total_new_after_msg2 == 0 and total_new_after_msg3 == 0
+    print(
+        "\n[FREEZE] novos token-events apos msg2={}, apos msg3={}  =>  FREEZE={}".format(
+            total_new_after_msg2, total_new_after_msg3, freeze_detected
+        )
+    )
 
     # Traceback scan
     tb_node, tb_block = find_any_traceback()
@@ -254,7 +266,14 @@ def run_once(run_index=1):
 
     # msg1 sequence: corrupted -> NAK -> RETRANSMISSAO -> ACK
     print("\n[MSG1] sequencia corrupcao/NAK/retransmissao:")
-    for frag in ["corrompido", "corrupted", "NAK", "RETRANSMISSAO", "ACK", "CRC NAO confere"]:
+    for frag in [
+        "corrompido",
+        "corrupted",
+        "NAK",
+        "RETRANSMISSAO",
+        "ACK",
+        "CRC NAO confere",
+    ]:
         line = find_line("A", frag) or find_line("B", frag) or find_line("C", frag)
         if line:
             # find which node
@@ -266,7 +285,16 @@ def run_once(run_index=1):
 
     # msg2 flow
     print("\n[MSG2] fluxo apos A enfileirar '1234':")
-    for frag in ["1234", "enfileirou", "enviando DADOS", "DATA", "DADOS", "retornou", "ACK", "waiting"]:
+    for frag in [
+        "1234",
+        "enfileirou",
+        "enviando DADOS",
+        "DATA",
+        "DADOS",
+        "retornou",
+        "ACK",
+        "waiting",
+    ]:
         for n, _, _ in NODES:
             lines = find_all_lines(n, frag, after_ts=t_msg2)
             for ts, ln in lines[:3]:
@@ -310,10 +338,18 @@ def main():
             break
         else:
             if attempt < max_attempts:
-                print("\n[driver] freeze nao reproduzido na tentativa {}; aguardando 3s antes de nova tentativa...".format(attempt))
+                print(
+                    "\n[driver] freeze nao reproduzido na tentativa {}; aguardando 3s antes de nova tentativa...".format(
+                        attempt
+                    )
+                )
                 time.sleep(3)
             else:
-                print("\n=== FREEZE NAO REPRODUZIDO em {} tentativas ===".format(max_attempts))
+                print(
+                    "\n=== FREEZE NAO REPRODUZIDO em {} tentativas ===".format(
+                        max_attempts
+                    )
+                )
 
 
 if __name__ == "__main__":

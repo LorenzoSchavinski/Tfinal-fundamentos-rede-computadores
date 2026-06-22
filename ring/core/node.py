@@ -1,18 +1,20 @@
 """Motor do no do anel: maquina de estados orientada a eventos.
 
-O ``Node`` detem TODO o estado mutavel e eh dirigido por UMA unica thread (o
-motor) que consome eventos de um ``queue.Queue`` (barramento). Threads externas
-(receptora UDP, vigia do token, console, timers) apenas POSTAM eventos; nunca
-mexem no estado. Como o barramento serializa tudo, nao ha locks no estado.
+O estado do protocolo pertence a uma unica thread (o motor), que consome eventos
+de um ``queue.Queue``. Receptor UDP, console e timers apenas postam eventos. O
+``TokenMonitor`` mantem somente seu proprio relogio, protegido internamente por
+lock, e avisa o motor quando detecta timeout.
 
 Token e dados sempre vao para o endereco do SUCESSOR. Intermediarios repassam os
 bytes do DATA VERBATIM; somente o destino enderecado edita o campo de controle
 (via set_controle, preservando crc e mensagem).
 """
+
 from __future__ import annotations
 
 import queue
 import threading
+import time
 import traceback
 
 from ring.protocol import crc as crc_mod
@@ -65,26 +67,49 @@ class Node(TokenLogicMixin, CommandsMixin):
             config.token_timeout, on_timeout=lambda: self.post("MON_TOKEN_TIMEOUT")
         )
 
-        # --- Estado da maquina (so o motor escreve) ---
+        # Estado do token e da controladora (alterado apenas pelo motor).
         self.is_controller = False
         self.has_token = False
-        self.waiting_for_data_return = False
         self.first_token_generated = False
         self.observed_activity = False
         self.epoch = 0
-        self.last_token_rx = None      # monotonic do ultimo token aceito (controladora)
+        self.last_token_rx = None  # monotonic do ultimo token aceito (controladora)
         self.expect_token_return = False
-        self.tokens_perdidos = 0       # contador de tokens perdidos detectados (PDF)
-        self.tokens_duplicados = 0     # contador de tokens duplicados detectados (PDF)
-        self._segurando_sozinho = False  # latch: True enquanto seguramos o token por estar sozinho (loga so uma vez)
+        self.tokens_perdidos = 0  # contador de tokens perdidos detectados (PDF)
+        self.tokens_duplicados = 0  # contador de tokens duplicados detectados (PDF)
+        self.remove_token_pending = False
 
+        # Estado da unica transmissao DATA que pode estar ativa neste no.
+        self.waiting_for_data_return = False
+        self.data_attempt_seq = 0
+        self.active_data_attempt = None
+        self.active_data_fingerprint = None
+
+        # Presenca dos membros: DISCOVER/HELLO atualizam o instante last_seen.
+        self.member_last_seen = {}
+        self.last_data_activity = 0.0
+        self._segurando_sozinho = False
+
+        # Ciclo de vida das threads e timers recorrentes.
         self._engine = None
-        self._first_token_timer = None  # timer de EVAL_FIRST_TOKEN, reagendado a cada novo membro
+        self._first_token_timer = None
+        self._discovery_timer = None
+        self._discovery_deferred = False
+        self._stopping = False
 
     # ------------------------------------------------------------------ bus
     def post(self, etype, **kw) -> None:
         """Coloca um evento (tipo, payload) no barramento do no."""
+        if self._stopping:
+            return
         self.bus.put((etype, kw))
+
+    def _start_timer(self, delay, etype, **kw):
+        """Agenda um evento daemon; o callback nunca altera o estado diretamente."""
+        timer = threading.Timer(delay, lambda: self.post(etype, **kw))
+        timer.daemon = True
+        timer.start()
+        return timer
 
     # -------------------------------------------------------- enderecamento
     def _addr_for(self, apelido, payload_ip):
@@ -122,20 +147,31 @@ class Node(TokenLogicMixin, CommandsMixin):
             self.post("RX_TOKEN")
         elif tipo == "DATA":
             # Idem para pacotes DATA: qualquer atividade no anel prova que o token existe.
-            log("[wire RX <- {}:{}] {}".format(addr[0], addr[1], p["raw"].decode("utf-8", errors="replace")))
+            log(
+                "[wire RX <- {}:{}] {}".format(
+                    addr[0], addr[1], p["raw"].decode("utf-8", errors="replace")
+                )
+            )
             self.monitor.note_activity()
             self.post("RX_DATA", parsed=p, raw=p["raw"])
         else:
             # UNKNOWN/nao parseavel: registra cru para disputa de interop e ignora.
-            log("[wire RX <- {}:{}] BAD/unknown: {}".format(addr[0], addr[1], p["raw"].decode("utf-8", errors="replace")))
+            log(
+                "[wire RX <- {}:{}] BAD/unknown: {}".format(
+                    addr[0], addr[1], p["raw"].decode("utf-8", errors="replace")
+                )
+            )
 
     # ----------------------------------------------------------- ciclo de vida
     def start(self) -> None:
         """Sobe transporte, registra a si mesmo, anuncia-se e inicia o motor."""
         self.transport.start()
         self.ring.update(self.apelido, self.advertise_ip, self.port)
+        self.member_last_seen[self.apelido] = time.monotonic()
         self._recompute_role()
-        self._engine = threading.Thread(target=self._engine_loop, name="engine", daemon=True)
+        self._engine = threading.Thread(
+            target=self._engine_loop, name="engine", daemon=True
+        )
         self._engine.start()
         # DISCOVER repetido ao longo da janela: em partidas escalonadas o primeiro
         # broadcast pode se perder (socket do par ainda nao escutando, UDP sem
@@ -147,11 +183,17 @@ class Node(TokenLogicMixin, CommandsMixin):
         # O timer eh (re)agendado a cada novo membro (_schedule_first_token_eval), de
         # modo que a avaliacao so dispara apos a membership ficar estavel.
         self._schedule_first_token_eval()
+        # Depois da formacao inicial, DISCOVER/HELLO passam a servir tambem como
+        # prova periodica de presenca, sem criar nenhum tipo novo de pacote.
+        self._schedule_discovery_tick(self.discovery_window)
         # Monitor sobe desabilitado; so liga quando for controladora com token.
         self.monitor.start()
 
-    discovery_window = 3.0  # sobrescrito por main antes de start(), se desejado
+    discovery_window = 6.0  # sobrescrito por main antes de start(), se desejado
     discover_interval = 0.5  # intervalo entre reenvios de DISCOVER na janela
+    presence_interval = 2.0
+    member_timeout = 6.0
+    data_quiet_period = 0.75
 
     def _broadcast_discover_repeated(self) -> None:
         """Reemite DISCOVER a cada ``discover_interval`` ate fechar a janela.
@@ -162,9 +204,17 @@ class Node(TokenLogicMixin, CommandsMixin):
         pacote = build_discover(self.apelido, self.advertise_ip)
 
         def envia(restante: float) -> None:
+            if self._stopping:
+                return
             self.transport.broadcast(pacote)
             if restante > self.discover_interval:
-                threading.Timer(self.discover_interval, envia, args=(restante - self.discover_interval,)).start()
+                timer = threading.Timer(
+                    self.discover_interval,
+                    envia,
+                    args=(restante - self.discover_interval,),
+                )
+                timer.daemon = True
+                timer.start()
 
         envia(self.discovery_window)
 
@@ -174,31 +224,50 @@ class Node(TokenLogicMixin, CommandsMixin):
         Substitui qualquer timer pendente, adiando a decisao enquanto a membership
         ainda muda. So o ultimo timer agendado dispara EVAL_FIRST_TOKEN.
         """
-        if getattr(self, "_first_token_timer", None) is not None:
+        if self._first_token_timer is not None:
             self._first_token_timer.cancel()
-        self._first_token_timer = threading.Timer(
-            self.discovery_window, lambda: self.post("EVAL_FIRST_TOKEN")
+        self._first_token_timer = self._start_timer(
+            self.discovery_window, "EVAL_FIRST_TOKEN"
         )
-        self._first_token_timer.start()
+
+    def _schedule_discovery_tick(self, delay=None) -> None:
+        """Agenda a proxima rodada periodica de DISCOVER/expiracao."""
+        if self._stopping:
+            return
+        if self._discovery_timer is not None:
+            self._discovery_timer.cancel()
+        self._discovery_timer = self._start_timer(
+            self.presence_interval if delay is None else delay,
+            "DISCOVERY_TICK",
+        )
 
     def _engine_loop(self) -> None:
         # Thread unica dona do estado: consome o barramento e despacha.
         while True:
             etype, kw = self.bus.get()
             if etype == "CMD_QUIT":
+                self._stopping = True
                 break
             handler = self._handlers.get(etype)
             if handler is not None:
                 try:
                     handler(self, **kw)
                 except Exception:
-                    log("[{}] ERRO inesperado no handler {}: {}".format(self.apelido, etype, traceback.format_exc()))
+                    log(
+                        "[{}] ERRO inesperado no handler {}: {}".format(
+                            self.apelido, etype, traceback.format_exc()
+                        )
+                    )
         self._shutdown()
 
     def _shutdown(self) -> None:
         # Encerramento limpo. NAO emitimos o pacote "30"/LEAVE: ele nao faz parte da
-        # spec (10/20/1000/2000) e nao deve ir num anel compartilhado. A saida deste
-        # no eh detectada pelos pares via o caminho reativo "maquinainexistente".
+        # spec (10/20/1000/2000) e nao deve ir num anel compartilhado. A ausencia
+        # passa a ser percebida pelas rodadas periodicas dos pacotes oficiais 10/20.
+        if self._first_token_timer is not None:
+            self._first_token_timer.cancel()
+        if self._discovery_timer is not None:
+            self._discovery_timer.cancel()
         self.monitor.stop()
         self.transport.close()
 
@@ -215,14 +284,23 @@ class Node(TokenLogicMixin, CommandsMixin):
         Nunca gera token aqui: a criacao do token inicial eh decidida so em
         EVAL_FIRST_TOKEN, protegida por observed_activity.
         """
+        era_controladora = self.is_controller
         self.is_controller = self.ring.is_controller(self.apelido)
+        if self.is_controller and not era_controladora:
+            # Ao assumir o controle, comeca uma janela limpa. Isso evita usar um
+            # timestamp antigo e da uma volta completa antes de declarar perda.
+            self.last_token_rx = None
+            self.expect_token_return = False
+            self.monitor.note_activity()
         if self.is_controller:
             # Uma controladora que entrou tarde tem first_token_generated False, mas
             # se ja observou atividade (token/dados existem) tambem deve vigiar.
-            self.monitor.set_enabled(self.first_token_generated or self.observed_activity)
+            self.monitor.set_enabled(
+                self.first_token_generated or self.observed_activity
+            )
         else:
             self.monitor.set_enabled(False)
-        # Limpa o latch de "sozinho" quando deixamos de estar sozinhos e nao seguramos o token.
+        # O latch evita repetir o mesmo log a cada avaliacao.
         if not self._is_alone() and not self.has_token:
             self._segurando_sozinho = False
 
@@ -232,7 +310,11 @@ class Node(TokenLogicMixin, CommandsMixin):
         Retorna True se o envio saiu, False se nao havia endereco ou o socket falhou.
         """
         if target_addr is None:
-            log("[{}] sem endereco para '{}', pacote descartado".format(self.apelido, target_apelido))
+            log(
+                "[{}] sem endereco para '{}', pacote descartado".format(
+                    self.apelido, target_apelido
+                )
+            )
             return False
         return self.transport.send_addr(target_addr[0], target_addr[1], data)
 
@@ -265,24 +347,59 @@ class Node(TokenLogicMixin, CommandsMixin):
         """Remove o item da cabeca da fila (concluido)."""
         self.queue.pop()
 
+    def _remove_member(self, apelido, motivo) -> bool:
+        """Remove um membro conhecido e recompõe papel/sucessor localmente."""
+        if apelido == self.apelido or apelido not in self.ring.members():
+            return False
+        self.ring.remove(apelido)
+        self.member_last_seen.pop(apelido, None)
+        log("[{}] removendo {} do anel ({})".format(self.apelido, apelido, motivo))
+        self._recompute_role()
+        if self.has_token and self._is_alone() and not self._segurando_sozinho:
+            self._segurando_sozinho = True
+            log(
+                "[{}] sou a unica maquina no anel; segurando o token ate outra entrar".format(
+                    self.apelido
+                )
+            )
+        return True
+
     # ----------------------------------------------------------- handlers RX
     def _update_member(self, apelido, ip, port) -> str:
         """Atualiza o anel, avisa em caso de troca de endereco e recalcula papel."""
+        self.member_last_seen[apelido] = time.monotonic()
         res = self.ring.update(apelido, ip, port)
         if res == "changed":
-            log("[{}] AVISO: '{}' mudou de endereco (rejuncao com novo IP ou colisao de apelido)".format(self.apelido, apelido))
+            log(
+                "[{}] AVISO: '{}' mudou de endereco (rejuncao com novo IP ou colisao de apelido)".format(
+                    self.apelido, apelido
+                )
+            )
         # Membro novo durante a fase de descoberta: adia a avaliacao do token
         # inicial por mais uma janela, ate a membership ficar quieta. So entao o
         # menor apelido conhecido equivale ao menor global e apenas ele gera.
         # Se um token ja existe (gerado ou observado), nao adia nada: late-join
         # nunca cria um segundo token (o guard de _on_eval_first_token continua).
-        if res == "new" and not self.first_token_generated and not self.observed_activity:
+        if (
+            res == "new"
+            and not self.first_token_generated
+            and not self.observed_activity
+        ):
             self._schedule_first_token_eval()
         self._recompute_role()
         # Estavamos sozinhos segurando o token e outra maquina acabou de entrar: retoma a circulacao.
-        if self.has_token and not self.waiting_for_data_return and not self._is_alone() and self._segurando_sozinho:
+        if (
+            self.has_token
+            and not self.waiting_for_data_return
+            and not self._is_alone()
+            and self._segurando_sozinho
+        ):
             self._segurando_sozinho = False
-            log("[{}] nova maquina entrou; retomando a circulacao do token".format(self.apelido))
+            log(
+                "[{}] nova maquina entrou; retomando a circulacao do token".format(
+                    self.apelido
+                )
+            )
             if not self.queue.is_empty():
                 self._send_data_packet(self.queue.peek())
             else:
@@ -290,14 +407,64 @@ class Node(TokenLogicMixin, CommandsMixin):
         return res
 
     def _on_rx_discover(self, apelido, ip, port) -> None:
-        self._update_member(apelido, ip, port)
+        res = self._update_member(apelido, ip, port)
         # Responde com HELLO para se identificar a quem entrou.
         self.transport.broadcast(build_hello(self.apelido, self.advertise_ip))
-        log("[{}] DISCOVER de {}, respondendo HELLO".format(self.apelido, apelido))
+        # DISCOVER periodico de membro conhecido eh idempotente e nao inunda o log.
+        if res == "new":
+            log(
+                "[{}] DISCOVER de {} (entrou no anel), respondendo HELLO".format(
+                    self.apelido, apelido
+                )
+            )
+        elif res == "changed":
+            log(
+                "[{}] DISCOVER de {} com endereco atualizado, respondendo HELLO".format(
+                    self.apelido, apelido
+                )
+            )
 
     def _on_rx_hello(self, apelido, ip, port) -> None:
         if self._update_member(apelido, ip, port) == "new":
             log("[{}] HELLO de {} (entrou no anel)".format(self.apelido, apelido))
+
+    def _on_discovery_tick(self) -> None:
+        """Revalida membros usando apenas DISCOVER/HELLO oficiais."""
+        now = time.monotonic()
+        self.member_last_seen[self.apelido] = now
+
+        # O PDF permite alteracao topologica somente sem DATA circulando. Como
+        # nao existe consulta global no protocolo, evitamos iniciar uma rodada
+        # enquanto este no ainda ve uma transmissao recente.
+        data_recente = (now - self.last_data_activity) < self.data_quiet_period
+        if self.waiting_for_data_return or data_recente:
+            self._discovery_deferred = True
+            self._schedule_discovery_tick(self.presence_interval)
+            return
+
+        self.transport.broadcast(build_discover(self.apelido, self.advertise_ip))
+
+        # Se rodadas foram adiadas por DATA, esta primeira rodada serve apenas
+        # para dar aos membros vivos a oportunidade de atualizar last_seen.
+        if self._discovery_deferred:
+            self._discovery_deferred = False
+            self._schedule_discovery_tick(self.presence_interval)
+            return
+
+        expirados = []
+        for apelido in self.ring.members():
+            if apelido == self.apelido:
+                continue
+            visto = self.member_last_seen.get(apelido, now)
+            if (now - visto) >= self.member_timeout:
+                expirados.append(apelido)
+
+        for apelido in expirados:
+            self._remove_member(
+                apelido, "sem DISCOVER/HELLO ha {:.1f}s".format(self.member_timeout)
+            )
+
+        self._schedule_discovery_tick(self.presence_interval)
 
     def _on_rx_data(self, parsed, raw) -> None:
         o = parsed["origem"]
@@ -305,6 +472,7 @@ class Node(TokenLogicMixin, CommandsMixin):
         ctrl = parsed["controle"]
         m = parsed["message"]
         self.observed_activity = True
+        self.last_data_activity = time.monotonic()
         self.monitor.note_activity()
 
         if o == self.apelido:
@@ -315,50 +483,81 @@ class Node(TokenLogicMixin, CommandsMixin):
                 # Nao mexe na fila nem repassa outro token (evitaria token duplicado).
                 log("[{}] retorno tardio de dados ignorado".format(self.apelido))
                 return
-            release = True
+            retorno = (d, parsed["crc"], m)
+            if retorno != self.active_data_fingerprint:
+                # Um ACK/NAK antigo pode chegar durante uma tentativa posterior.
+                # Sem alterar o protocolo, comparamos os campos que efetivamente
+                # foram enviados para nao concluir a mensagem errada.
+                log(
+                    "[{}] retorno de dados antigo/diferente ignorado".format(
+                        self.apelido
+                    )
+                )
+                return
             if d == BROADCAST:
-                log("[{}] BROADCAST concluido (deu a volta no anel)".format(self.apelido))
+                log(
+                    "[{}] BROADCAST concluido (deu a volta no anel)".format(
+                        self.apelido
+                    )
+                )
                 self._drop_head()
             elif ctrl == CTRL_ACK:
                 log("[{}] mensagem entregue com sucesso (ACK)".format(self.apelido))
                 self._drop_head()
             elif ctrl == CTRL_NONE:
-                log("[{}] destino {} ausente/desligado (maquinainexistente)".format(self.apelido, d))
+                log(
+                    "[{}] destino {} ausente/desligado (maquinainexistente)".format(
+                        self.apelido, d
+                    )
+                )
                 self._drop_head()
-                # Cura reativa da topologia: o destino nao existe mais no anel.
-                # Remove-o e recalcula sucessor/controladora para que o token passe
-                # a saltar o no ausente. Usa so o sinal da spec (nenhum pacote extra).
+                # Sinal complementar de ausencia: se o DATA voltou sem ACK/NAK,
+                # remove o destino sem esperar a expiracao periodica.
                 if d != self.apelido and d != BROADCAST and d in self.ring.members():
-                    log("[{}] removendo {} do anel (maquinainexistente)".format(self.apelido, d))
-                    self.ring.remove(d)
-                    self._recompute_role()
+                    self._remove_member(d, "maquinainexistente")
             elif ctrl == CTRL_NAK:
                 head = self.queue.peek()
                 if head is None:
                     # Cabeca ausente (fila inconsistente): libera o token sem travar.
-                    log("[{}] NAK recebido mas fila vazia -> liberando token".format(self.apelido))
+                    log(
+                        "[{}] NAK recebido mas fila vazia -> liberando token".format(
+                            self.apelido
+                        )
+                    )
                 elif not head.retransmit_used:
                     # Spec: retransmite exatamente uma vez, agora sem injetar falha.
                     head.retransmit_used = True
-                    head.no_error = True
-                    log("[{}] RETRANSMISSAO: NAK recebido de {}, reenviando msg correta na proxima passagem do token".format(self.apelido, d))
+                    head.skip_fault_injection = True
+                    log(
+                        "[{}] RETRANSMISSAO: NAK recebido de {}, reenviando msg correta na proxima passagem do token".format(
+                            self.apelido, d
+                        )
+                    )
                 else:
-                    log("[{}] NAK novamente apos retransmissao unica -> descartando msg (spec: retransmite apenas uma vez)".format(self.apelido))
+                    log(
+                        "[{}] NAK novamente apos retransmissao unica -> descartando msg (spec: retransmite apenas uma vez)".format(
+                            self.apelido
+                        )
+                    )
                     self._drop_head()
             else:
                 # Controle inesperado de volta a origem: loga, descarta e libera o token.
-                log("[{}] controle inesperado '{}' de volta a origem -> descartando msg e liberando token".format(self.apelido, ctrl))
+                log(
+                    "[{}] controle inesperado '{}' de volta a origem -> descartando msg e liberando token".format(
+                        self.apelido, ctrl
+                    )
+                )
                 self._drop_head()
-                # release permanece True
-            if release:
-                self.waiting_for_data_return = False
-                self._refresh_monitor_pause()
-                self._forward_token()
+            self._complete_data_round()
             return
 
         # Nao sou a origem.
         if d == BROADCAST:
-            log("[{}] BROADCAST de {}: \"{}\"".format(self.apelido, o, m.decode("utf-8", errors="replace")))
+            log(
+                '[{}] BROADCAST de {}: "{}"'.format(
+                    self.apelido, o, m.decode("utf-8", errors="replace")
+                )
+            )
             self._send_to_successor(raw)  # repassa verbatim
             return
 
@@ -367,19 +566,22 @@ class Node(TokenLogicMixin, CommandsMixin):
             ok = crc_mod.matches(m, parsed["crc"])
             new = CTRL_ACK if ok else CTRL_NAK
             if not ok:
-                log("[{}] CRC NAO confere de {} (recebido={} calculado={}) -> NAK".format(
-                    self.apelido, o, parsed["crc"], crc_mod.crc32(m)))
-            log("[{}] DADOS de {}: \"{}\" -> {}".format(
-                self.apelido, o, m.decode("utf-8", errors="replace"), new))
+                log(
+                    "[{}] CRC NAO confere de {} (recebido={} calculado={}) -> NAK".format(
+                        self.apelido, o, parsed["crc"], crc_mod.crc32(m)
+                    )
+                )
+            log(
+                '[{}] DADOS de {}: "{}" -> {}'.format(
+                    self.apelido, o, m.decode("utf-8", errors="replace"), new
+                )
+            )
             self._send_to_successor(set_controle(raw, new))
             return
 
         # Intermediario: nem para mim nem broadcast -> repassa verbatim.
         log("[{}] repassando DADOS de {} para {}".format(self.apelido, o, d))
         self._send_to_successor(raw)
-
-    # Tabela de despacho: tipo de evento -> metodo (preenchida abaixo da classe).
-    _handlers = {}
 
 
 # Registro dos handlers fora do corpo da classe para manter o __init__ enxuto.
@@ -398,4 +600,5 @@ Node._handlers = {
     "CMD_JOIN": Node._on_cmd_join,
     "MON_TOKEN_TIMEOUT": Node._on_mon_token_timeout,
     "EVAL_FIRST_TOKEN": Node._on_eval_first_token,
+    "DISCOVERY_TICK": Node._on_discovery_tick,
 }

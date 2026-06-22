@@ -2,8 +2,9 @@
 
 O algoritmo do zlib eh o mesmo usado por java.util.zip.CRC32, portanto o valor
 produzido aqui eh byte-a-byte identico ao de outros grupos que usem Java/zlib.
-Isso garante a interoperabilidade do campo de CRC trafegado na rede.
+O projeto calcula o CRC somente sobre os bytes da mensagem e o envia em decimal.
 """
+
 from __future__ import annotations
 
 import zlib

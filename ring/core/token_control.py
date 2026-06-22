@@ -8,6 +8,7 @@ A deteccao de token DUPLICADO (intervalo curto demais entre tokens) NAO eh feita
 aqui: ela mora no no, no tratamento de RX_TOKEN, porque depende do papel atual e
 do historico de chegada do token.
 """
+
 from __future__ import annotations
 
 import threading
@@ -23,40 +24,64 @@ class TokenMonitor:
         self.on_timeout = on_timeout
 
         self._last_activity = time.monotonic()
-        self._paused = False   # controladora segura o token aguardando o retorno dos dados
-        self._enabled = False  # so vale apos existir token e enquanto for controladora
+        # A pausa cobre os periodos em que a controladora segura o token ou
+        # aguarda o retorno de seu DATA; habilitado so vale para a controladora.
+        self._paused = False
+        self._enabled = False
         self._stop = False
         self._thread = None
+        # RX, motor e esta thread acessam o relogio; o lock deixa essa pequena
+        # excecao ao modelo de "estado no motor" explicita e portavel.
+        self._lock = threading.Lock()
 
     def note_activity(self) -> None:
         """Marca atividade do anel (todo RX/envio/encaminhamento de token e dados)."""
-        self._last_activity = time.monotonic()
+        with self._lock:
+            self._last_activity = time.monotonic()
 
     def set_paused(self, flag) -> None:
         """Pausa: enquanto a controladora espera seus dados voltarem, nao disparar."""
-        self._paused = bool(flag)
+        with self._lock:
+            self._paused = bool(flag)
 
     def set_enabled(self, flag) -> None:
         """Habilita a vigilancia (so quando um token ja existe e este no controla)."""
-        self._enabled = bool(flag)
+        with self._lock:
+            self._enabled = bool(flag)
 
     def start(self) -> None:
         """Sobe a thread daemon de vigilancia."""
-        self._thread = threading.Thread(target=self._loop, name="token-monitor", daemon=True)
+        self._thread = threading.Thread(
+            target=self._loop, name="token-monitor", daemon=True
+        )
         self._thread.start()
 
     def stop(self) -> None:
         """Encerra a thread de vigilancia."""
-        self._stop = True
+        with self._lock:
+            self._stop = True
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=0.3)
 
     def _loop(self) -> None:
         # Acorda periodicamente; so age quando habilitado, nao pausado e o silencio
         # ultrapassou o timeout. Apos disparar uma vez, reseta o relogio para
         # esperar outro intervalo completo antes de um novo disparo.
-        while not self._stop:
+        while True:
             time.sleep(0.1)
-            if not self._enabled or self._paused:
+            now = time.monotonic()
+            with self._lock:
+                if self._stop:
+                    return
+                deve_disparar = (
+                    self._enabled
+                    and not self._paused
+                    and (now - self._last_activity) > self.token_timeout
+                )
+                if deve_disparar:
+                    # Reinicia a janela antes do callback para nunca empilhar
+                    # varios eventos de timeout no barramento.
+                    self._last_activity = now
+            if not deve_disparar:
                 continue
-            if (time.monotonic() - self._last_activity) > self.token_timeout:
-                self.on_timeout()
-                self.note_activity()
+            self.on_timeout()

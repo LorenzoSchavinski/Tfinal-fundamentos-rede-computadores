@@ -12,14 +12,58 @@ Comandos:
   join | discover               reenvia DISCOVER (atualiza topologia)
   help | ?                      mostra esta ajuda
   quit | exit | sair            encerra
-[C] sou a primeira maquina (menor apelido) e nenhum token observado -> gerando token inicial
-[C] gerou/inseriu um token na rede
-[C] DISCOVER de A, respondendo HELLO
+[C] HELLO de A (entrou no anel)
 [C] HELLO de B (entrou no anel)
-[C] DISCOVER de B, respondendo HELLO
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:A:B:NAK:891568578:a?c
+[C] repassando DADOS de A para B
+[wire TX -> 127.0.0.1:6001] 2000:A:B:NAK:891568578:a?c
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:A:B:ACK:891568578:abc
+[C] repassando DADOS de A para B
+[wire TX -> 127.0.0.1:6001] 2000:A:B:ACK:891568578:abc
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:A:B:NAK:2615402659:123?
+[C] repassando DADOS de A para B
+[wire TX -> 127.0.0.1:6001] 2000:A:B:NAK:2615402659:123?
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:A:B:ACK:2615402659:1234
+[C] repassando DADOS de A para B
+[wire TX -> 127.0.0.1:6001] 2000:A:B:ACK:2615402659:1234
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:A:C:maquinainexistente:907060870:h3llo
+[C] CRC NAO confere de A (recebido=907060870 calculado=3631675128) -> NAK
+[C] DADOS de A: "h3llo" -> NAK
+[wire TX -> 127.0.0.1:6001] 2000:A:C:NAK:907060870:h3llo
+[C] recebeu o token
+[C] enviando token para A
+[wire RX <- 127.0.0.1:6002] 2000:A:C:maquinainexistente:907060870:hello
+[C] DADOS de A: "hello" -> ACK
+[wire TX -> 127.0.0.1:6001] 2000:A:C:ACK:907060870:hello
+[C] recebeu o token
+[C] enviando token para A
+[C] recebeu o token
+[C] enviando token para A
 [C] STATUS
   endereco: 127.0.0.1:6003  modo: local
   controladora: False  com_token: False  aguardando_retorno: False
+  retirada_token_pendente: False
   anel: ['A', 'B', 'C']
-  sucessor: A  fila: 0  primeiro_token_gerado: True
+  sucessor: A  fila: 0  primeiro_token_gerado: False
   tokens_perdidos: 0  tokens_duplicados: 0
+[C] recebeu o token
